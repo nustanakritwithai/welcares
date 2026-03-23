@@ -1,6 +1,7 @@
 import{useState,createContext,useContext}from"react";
 const C={pri:'#7F77DD',suc:'#1D9E75',wrn:'#F59E0B',dan:'#E24B4A',drk:'#1E293B',nvy:'#1E3A8A',mid:'#64748B',bdr:'#E2E8F0',bg:'#F8FAFC',txt:'#1E293B',lin:'#06C755',tel:'#14B8A6',pur:'#8B5CF6',org:'#F97316'};
 const Ctx=createContext(null);const useCtx=()=>useContext(Ctx);
+const GMAPS_KEY=import.meta.env.VITE_GOOGLE_MAPS_API_KEY||'';
 function calcP(base,km,grab,o=0.05,w=0.25){const d=Math.round(km*15),op=Math.round(base*o),wc=Math.round(base*w),g=grab?Math.round((base+d)*0.1):0;return{base,dist:d,ops:op,wc,grab:g,total:base+d+op+wc+g};}
 
 function Crd({children,s={}}){return <div style={{background:'#fff',borderRadius:9,padding:'7px 10px',border:'1px solid '+C.bdr,marginBottom:5,flexShrink:0,...s}}>{children}</div>;}
@@ -284,14 +285,35 @@ function DHomeNew({openHam}){
 
 // ── NEW BOOKING STEP 1: PIN MAP + TRANSPORT ───────────────────────
 function DNStep1(){
+  const[coords,setCoords]=useState({lat:13.7563,lng:100.5018});
+  const[geoErr,setGeoErr]=useState('');
+  const locateMe=()=>{
+    if(!navigator.geolocation){setGeoErr('อุปกรณ์นี้ไม่รองรับการระบุตำแหน่ง');return;}
+    navigator.geolocation.getCurrentPosition(
+      p=>{setCoords({lat:p.coords.latitude,lng:p.coords.longitude});setGeoErr('');},
+      ()=>setGeoErr('ไม่สามารถอ่านพิกัดได้ กรุณาอนุญาตตำแหน่ง'),
+      {enableHighAccuracy:true,timeout:10000}
+    );
+  };
+  const mapUrl=GMAPS_KEY?`https://www.google.com/maps/embed/v1/place?key=${GMAPS_KEY}&q=${coords.lat},${coords.lng}&zoom=15`:'';
   return <div style={{background:C.bg}}>
     <div style={{background:C.pri,padding:'7px 11px'}}><span style={{color:'#fff',fontWeight:700,fontSize:11}}>{"📍 Step 1: ปักหมุด + เลือกการเดินทาง"}</span></div>
     <div style={{padding:'8px 10px 12px'}}>
       <Alrt t="info" ch="AI คำนวณระยะทาง → ประเมินราคาค่าเดินทางอัตโนมัติ"/>
-      <div style={{background:'#F1F5F9',border:'1px solid '+C.bdr,borderRadius:12,height:110,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',marginBottom:6,cursor:'pointer'}}>
-        <span style={{fontSize:28}}>{"📍"}</span><span style={{fontSize:10,color:C.mid,marginTop:3}}>{"กดปักหมุดบนแผนที่"}</span>
+      {GMAPS_KEY
+        ?<div style={{borderRadius:12,overflow:'hidden',border:'1px solid '+C.bdr,marginBottom:6}}>
+          <iframe title="welcares-map" src={mapUrl} width="100%" height="150" style={{border:'none',display:'block'}} loading="lazy" referrerPolicy="no-referrer-when-downgrade"/>
+        </div>
+        :<div style={{background:'#FFF1F2',border:'1px solid #FCA5A5',borderRadius:12,padding:'8px 10px',fontSize:9,color:'#991B1B',marginBottom:6}}>
+          {"ยังไม่พบ Google Maps API Key กรุณาตั้งค่า VITE_GOOGLE_MAPS_API_KEY"}
+        </div>}
+      <div style={{display:'flex',gap:6,marginBottom:6}}>
+        <Btn ch="📍 ใช้ตำแหน่งปัจจุบัน" col={C.pri} sm fn={locateMe} s={{flex:1}}/>
       </div>
-      <Crd s={{background:'#ECFDF5',border:'1px solid #6EE7B7',marginBottom:6}}><span style={{fontSize:9}}>{"📍 ลาดพร้าว ซ.12 กรุงเทพฯ · ~8km จากรพ.จุฬาฯ"}</span></Crd>
+      <Crd s={{background:'#ECFDF5',border:'1px solid #6EE7B7',marginBottom:6}}>
+        <span style={{fontSize:9}}>{`📍 Lat ${coords.lat.toFixed(6)}, Lng ${coords.lng.toFixed(6)} · ~8km จากรพ.จุฬาฯ`}</span>
+      </Crd>
+      {geoErr&&<Alrt t="warning" ch={geoErr}/>}
       <HR/>
       <ST ic="🚗" ch="เลือกวิธีเดินทาง (ไป-กลับ)"/>
       <TrPickerFull/>
