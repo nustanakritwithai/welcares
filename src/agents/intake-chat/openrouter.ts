@@ -1,18 +1,20 @@
 /**
- * OpenRouter AI Service (DISABLED for GitHub Pages deployment)
- * Using rule-based fallback only - no backend required
+ * OpenRouter AI Service (User-provided API Key)
+ * API key comes from user input in UI, stored in localStorage
  * 
- * @version 3.1 - Static Site Mode (GitHub Pages)
+ * @version 4.0 - User API Key Mode (GitHub Pages)
  * @module src/agents/intake-chat/openrouter
  */
 
 import type { PartialIntakeInput } from '../intake/types';
 
 // ============================================================================
-// CONFIGURATION - DISABLED
+// CONFIGURATION
 // ============================================================================
 
-// Model definitions kept for reference but not used
+const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+
+// Model definitions
 export const MODELS = {
   NEMOTRON: 'nvidia/nemotron-3-super-120b-a12b:free',
   GPT4O_MINI: 'openai/gpt-4o-mini',
@@ -21,9 +23,41 @@ export const MODELS = {
   DEEPSEEK: 'deepseek/deepseek-chat',
 } as const;
 
+// Default model
+const DEFAULT_MODEL = MODELS.NEMOTRON;
+
 // ============================================================================
 // TYPES
 // ============================================================================
+
+export interface ChatCompletionMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatCompletionRequest {
+  model: string;
+  messages: ChatCompletionMessage[];
+  temperature?: number;
+  max_tokens?: number;
+  response_format?: { type: 'json_object' | 'text' };
+}
+
+export interface ChatCompletionResponse {
+  id: string;
+  choices: Array<{
+    message: {
+      role: string;
+      content: string;
+    };
+    finish_reason: string;
+  }>;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+}
 
 export interface ParsedIntent {
   intent: 'fill_field' | 'confirm' | 'reject' | 'edit' | 'greeting' | 'question' | 'unknown';
@@ -35,53 +69,220 @@ export interface ParsedIntent {
 }
 
 // ============================================================================
-// DISABLED FUNCTIONS - Always return fallback
+// API KEY MANAGEMENT
+// ============================================================================
+
+const STORAGE_KEY = 'welcares_api_key';
+
+export function getStoredApiKey(): string {
+  if (typeof window === 'undefined') return '';
+  return localStorage.getItem(STORAGE_KEY) || '';
+}
+
+export function setStoredApiKey(key: string): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(STORAGE_KEY, key);
+}
+
+export function clearStoredApiKey(): void {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(STORAGE_KEY);
+}
+
+/**
+ * Check if AI is configured (user has provided API key)
+ */
+export function isAIConfigured(): boolean {
+  return !!getStoredApiKey();
+}
+
+// ============================================================================
+// API CLIENT
+// ============================================================================
+
+async function callOpenRouter(
+  params: ChatCompletionRequest
+): Promise<ChatCompletionResponse> {
+  const apiKey = getStoredApiKey();
+  
+  if (!apiKey) {
+    throw new Error('OpenRouter API key not configured. Please set your API key in the settings.');
+  }
+
+  const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      'HTTP-Referer': window.location.origin,
+      'X-Title': 'WelCares Intake Chat',
+    },
+    body: JSON.stringify({
+      ...params,
+      temperature: params.temperature ?? 0.3,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`OpenRouter API error: ${response.status} - ${error}`);
+  }
+
+  return await response.json();
+}
+
+// ============================================================================
+// SYSTEM PROMPTS
+// ============================================================================
+
+const INTAKE_PARSER_SYSTEM = `คุณคือผู้ช่วย AI สำหรับระบบจองบริการรถรับ-ส่งผู้ป่วย WelCares
+
+หน้าที่ของคุณ:
+1. วิเคราะห์ข้อความจากผู้ใช้
+2. สกัดข้อมูลที่จำเป็น (extract information)
+3. ตอบกลับเป็นภาษาไทยแบบเป็นกันเอง
+
+ข้อมูลที่ต้องสกัด:
+- contactName: ชื่อผู้ติดต่อ
+- contactPhone: เบอร์โทรศัพท์
+- serviceType: ประเภทบริการ (hospital-visit, follow-up, physical-therapy, dialysis, checkup, vaccination, other)
+- appointmentDate: วันนัด (YYYY-MM-DD)
+- appointmentTime: เวลานัด (HH:MM)
+- pickupAddress: ที่อยู่รับ
+- dropoffAddress: ที่อยู่ส่ง
+- patientName: ชื่อผู้ป่วย
+- mobilityLevel: การเคลื่อนไหว (independent, assisted, wheelchair, bedridden)
+
+รูปแบบการตอบ (JSON เท่านั้น):
+{
+  "intent": "fill_field|confirm|reject|edit|greeting|question|unknown",
+  "field": "ชื่อฟิลด์ที่กรอก (ถ้ามี)",
+  "value": "ค่าที่สกัดได้",
+  "confidence": 0.0-1.0,
+  "response": "ข้อความตอบกลับผู้ใช้"
+}`;
+
+const CHAT_RESPONSE_SYSTEM = `คุณคือ "น้องแคร์" ผู้ช่วยจองบริการรถรับ-ส่งผู้ป่วย WelCares
+
+บุคลิก:
+- เป็นกันเอง อ่อนโยน ใส่ใจ
+- ใช้ภาษาไทยสุภาพ ไม่ใช้คำยาก
+- ตอบสั้น กระชับ ได้ใจความ
+- ใช้ emoji ได้เล็กน้อย 💜
+
+กฎการตอบ:
+1. ตอบตรงประเด็น ไม่เวิ่นเว้อ
+2. ถ้าข้อมูลไม่ครบ ถามต่อเนื่อง
+3. ถ้าข้อมูลครบ สรุปให้ยืนยัน
+4. ไม่แนะนำโรงพยาบาลหรือการรักษา
+5. ไม่ขอข้อมูลส่วนตัวที่ไม่จำเป็น`;
+
+// ============================================================================
+// HIGH-LEVEL FUNCTIONS
 // ============================================================================
 
 /**
- * AI is disabled in static site mode (GitHub Pages)
- * Always returns false
- */
-export function isAIConfigured(): boolean {
-  return false;
-}
-
-/**
- * Parse user message using AI - DISABLED
- * Always returns unknown intent (fallback to rule-based)
+ * Parse user message using AI
  */
 export async function parseMessageWithAI(
-  _userMessage: string,
-  _currentFormData: PartialIntakeInput,
+  userMessage: string,
+  currentFormData: PartialIntakeInput,
   _context: string[] = []
 ): Promise<ParsedIntent> {
-  // AI disabled - use rule-based parser instead
-  return { intent: 'unknown', confidence: 0 };
+  if (!isAIConfigured()) {
+    return { intent: 'unknown', confidence: 0 };
+  }
+
+  try {
+    const response = await callOpenRouter({
+      model: DEFAULT_MODEL,
+      messages: [
+        { role: 'system', content: INTAKE_PARSER_SYSTEM },
+        {
+          role: 'user',
+          content: `ข้อมูลปัจจุบัน: ${JSON.stringify(currentFormData)}\n\nข้อความผู้ใช้: "${userMessage}"\n\nตอบกลับในรูปแบบ JSON:`,
+        },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.3,
+      max_tokens: 500,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      return { intent: 'unknown', confidence: 0 };
+    }
+
+    const parsed = JSON.parse(content);
+
+    return {
+      intent: parsed.intent || 'unknown',
+      field: parsed.field,
+      value: parsed.value,
+      confidence: parsed.confidence || 0.5,
+      response: parsed.response,
+      missingInfo: parsed.missingInfo,
+    };
+  } catch (error) {
+    console.error('[parseMessageWithAI] Error:', error);
+    return { intent: 'unknown', confidence: 0 };
+  }
 }
 
 /**
- * Generate AI chat response - DISABLED
- * Always returns empty (fallback to rule-based)
+ * Generate AI chat response
  */
 export async function generateAIResponse(
-  _userMessage: string,
-  _currentFormData: PartialIntakeInput,
-  _missingFields: string[],
+  userMessage: string,
+  currentFormData: PartialIntakeInput,
+  missingFields: string[],
   _context: string[] = []
 ): Promise<{ content: string; quickReplies?: Array<{ label: string; value: string }> }> {
-  // AI disabled - use rule-based generator instead
-  return { content: '' };
+  if (!isAIConfigured()) {
+    return { content: '' };
+  }
+
+  try {
+    const systemPrompt = `${CHAT_RESPONSE_SYSTEM}
+
+ข้อมูลปัจจุบันที่มี:
+${JSON.stringify(currentFormData, null, 2)}
+
+ฟิลด์ที่ยังขาด: ${missingFields.join(', ')}
+
+คุณคือน้องแคร์ กำลังคุยกับลูกค้า`;
+
+    const response = await callOpenRouter({
+      model: DEFAULT_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      temperature: 0.5,
+      max_tokens: 500,
+    });
+
+    const content = response.choices[0]?.message?.content?.trim() || '';
+
+    return { content };
+  } catch (error) {
+    console.error('[generateAIResponse] Error:', error);
+    return { content: '' };
+  }
 }
 
 // ============================================================================
 // EXPORTS
 // ============================================================================
 
-export { MODELS };
+export { OPENROUTER_BASE_URL, DEFAULT_MODEL };
 
 export default {
   parseMessageWithAI,
   generateAIResponse,
   isAIConfigured,
+  getStoredApiKey,
+  setStoredApiKey,
+  clearStoredApiKey,
   MODELS,
 };

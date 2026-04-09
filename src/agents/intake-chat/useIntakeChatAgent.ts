@@ -17,6 +17,7 @@ import type { PartialIntakeInput, IntakeInput } from '../intake/types';
 import { validateFormData, type ValidateFormDataResult } from '../intake/validator';
 import { previewIntake, submitIntake } from '../intake/service';
 import { parseInput, detectIntent, applyParsedAnswer } from './parser';
+import { parseMessageWithAI, generateAIResponse, isAIConfigured } from './openrouter';
 import {
   generateWelcomeMessages,
   generateNextQuestion,
@@ -225,12 +226,31 @@ export function useIntakeChatAgent(
       let parsed;
       let aiResponse: string | undefined;
       
-      // AI is disabled in static site mode - always use rule-based
-      if (targetField) {
-        parsed = parseInput(text, targetField);
-      } else {
-        // Auto-detect field if no target
-        parsed = parseInput(text, 'unknown');
+      try {
+        const aiEnabled = await isAIConfigured();
+        if (aiEnabled) {
+          const aiResult = await parseMessageWithAI(text, formData, messages.map(m => m.content));
+          if (aiResult.confidence > 0.6 && aiResult.field && aiResult.value !== undefined) {
+            parsed = {
+              field: aiResult.field,
+              value: aiResult.value,
+              confidence: aiResult.confidence,
+            };
+            aiResponse = aiResult.response;
+          }
+        }
+      } catch (aiError) {
+        console.error('AI parsing failed:', aiError);
+      }
+      
+      // Fallback to rule-based parsing if AI fails or not configured
+      if (!parsed) {
+        if (targetField) {
+          parsed = parseInput(text, targetField);
+        } else {
+          // Auto-detect field if no target
+          parsed = parseInput(text, 'unknown');
+        }
       }
       
       // Apply parsed answer to form data
@@ -278,8 +298,38 @@ export function useIntakeChatAgent(
           }
         }
       } else {
-        // Continue with next question - rule-based only (AI disabled in static mode)
-        const nextQuestion = generateNextQuestion(validation, newFormData);
+        // Continue with next question - try AI first
+        let nextQuestion: ChatMessage | null = null;
+        
+        try {
+          const aiEnabled = await isAIConfigured();
+          if (aiEnabled) {
+            const aiResult = await generateAIResponse(
+              text,
+              newFormData,
+              validation.missingFields,
+              messages.map(m => m.content)
+            );
+            if (aiResult.content) {
+              nextQuestion = {
+                id: `msg-${Date.now()}`,
+                role: 'assistant',
+                content: aiResult.content,
+                type: 'text',
+                timestamp: new Date(),
+                quickReplies: aiResult.quickReplies,
+              } as ChatMessage;
+            }
+          }
+        } catch (aiError) {
+          console.error('AI response generation failed:', aiError);
+        }
+        
+        // Fallback to rule-based
+        if (!nextQuestion) {
+          nextQuestion = generateNextQuestion(validation, newFormData);
+        }
+        
         if (nextQuestion) {
           addMessage(nextQuestion);
         }

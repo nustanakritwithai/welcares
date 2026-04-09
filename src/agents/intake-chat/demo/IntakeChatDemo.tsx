@@ -547,8 +547,26 @@ export const IntakeChatDemo: React.FC<IntakeChatDemoProps> = ({
 
   const [inputText, setInputText] = useState('');
   const [showQuickForm, setShowQuickForm] = useState(false);
+  const [apiKey, setApiKey] = useState('');
+  const [showApiInput, setShowApiInput] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Load API key from localStorage on mount
+  useEffect(() => {
+    const savedKey = localStorage.getItem('welcares_api_key');
+    if (savedKey) {
+      setApiKey(savedKey);
+    }
+  }, []);
+
+  // Save API key to localStorage
+  const handleSaveApiKey = () => {
+    if (apiKey.trim()) {
+      localStorage.setItem('welcares_api_key', apiKey.trim());
+      setShowApiInput(false);
+    }
+  };
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -643,18 +661,90 @@ export const IntakeChatDemo: React.FC<IntakeChatDemoProps> = ({
               <span style={styles.subtitle}>ผู้ช่วยจองบริการ</span>
             </div>
           </div>
-          {!isSuccess && (
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {/* API Key Toggle Button */}
             <button
-              style={styles.restartButton}
-              onClick={restart}
-              title="เริ่มใหม่"
+              style={{
+                ...styles.restartButton,
+                backgroundColor: apiKey ? '#4CAF50' : 'rgba(255, 255, 255, 0.2)',
+              }}
+              onClick={() => setShowApiInput(!showApiInput)}
+              title={apiKey ? 'API Key ตั้งค่าแล้ว' : 'ตั้งค่า API Key'}
               type="button"
             >
-              🔄
+              🔑
             </button>
-          )}
+            {!isSuccess && (
+              <button
+                style={styles.restartButton}
+                onClick={restart}
+                title="เริ่มใหม่"
+                type="button"
+              >
+                🔄
+              </button>
+            )}
+          </div>
         </div>
       </header>
+
+      {/* API Key Input Panel */}
+      {showApiInput && (
+        <div style={apiKeyStyles.container}>
+          <div style={apiKeyStyles.header}>
+            <span style={apiKeyStyles.headerIcon}>🔐</span>
+            <span style={apiKeyStyles.headerText}>ตั้งค่า OpenRouter API Key</span>
+          </div>
+          <div style={apiKeyStyles.content}>
+            <input
+              type="password"
+              style={apiKeyStyles.input}
+              placeholder="sk-or-v1-xxxxxxxxxxxxxxxx"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSaveApiKey()}
+            />
+            <div style={apiKeyStyles.buttons}>
+              <button
+                style={apiKeyStyles.saveButton}
+                onClick={handleSaveApiKey}
+                disabled={!apiKey.trim()}
+                type="button"
+              >
+                💾 บันทึก
+              </button>
+              <button
+                style={apiKeyStyles.clearButton}
+                onClick={() => {
+                  setApiKey('');
+                  localStorage.removeItem('welcares_api_key');
+                }}
+                type="button"
+              >
+                🗑️ ล้าง
+              </button>
+              <button
+                style={apiKeyStyles.cancelButton}
+                onClick={() => setShowApiInput(false)}
+                type="button"
+              >
+                ❌ ปิด
+              </button>
+            </div>
+            <p style={apiKeyStyles.help}>
+              รับ API Key ได้ที่{' '}
+              <a
+                href="https://openrouter.ai/keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={apiKeyStyles.link}
+              >
+                openrouter.ai/keys
+              </a>
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Message Area */}
       <div style={styles.messageArea}>
@@ -1126,6 +1216,87 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'center',
     gap: '6px',
     transition: 'all 0.2s',
+  },
+};
+
+// API Key Input Styles
+const apiKeyStyles: Record<string, React.CSSProperties> = {
+  container: {
+    backgroundColor: '#fff',
+    borderRadius: '16px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+    margin: '12px 16px',
+    overflow: 'hidden',
+  },
+  header: {
+    backgroundColor: '#4CAF50',
+    color: '#fff',
+    padding: '12px 16px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  headerIcon: {
+    fontSize: '18px',
+  },
+  headerText: {
+    fontWeight: 'bold',
+    fontSize: '15px',
+  },
+  content: {
+    padding: '16px',
+  },
+  input: {
+    width: '100%',
+    padding: '12px',
+    borderRadius: '10px',
+    border: '1px solid #4CAF50',
+    fontSize: '14px',
+    fontFamily: 'monospace',
+    boxSizing: 'border-box' as const,
+    marginBottom: '12px',
+  },
+  buttons: {
+    display: 'flex',
+    gap: '8px',
+    flexWrap: 'wrap' as const,
+  },
+  saveButton: {
+    flex: 1,
+    padding: '10px',
+    backgroundColor: '#4CAF50',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontWeight: 500,
+    minWidth: '80px',
+  },
+  clearButton: {
+    padding: '10px 16px',
+    backgroundColor: '#FF5722',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+  },
+  cancelButton: {
+    padding: '10px 16px',
+    backgroundColor: '#F0F0F0',
+    color: '#666',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+  },
+  help: {
+    margin: '12px 0 0 0',
+    fontSize: '12px',
+    color: '#666',
+    textAlign: 'center' as const,
+  },
+  link: {
+    color: '#7F77DD',
+    textDecoration: 'underline',
   },
 };
 
