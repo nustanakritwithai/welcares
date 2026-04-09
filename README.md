@@ -1,16 +1,67 @@
-# React + Vite
+# WelCares - AI-Powered Healthcare Coordination Platform
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+แพลตฟอร์มบริการสุขภาพอัจฉริยะ ที่ผสาน AI Agents เข้ากับระบบจัดการงานบริการสุขภาพแบบครบวงจร
 
-Currently, two official plugins are available:
+## ภาพรวมระบบ
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+WelCares เป็นแพลตฟอร์มที่เชื่อมต่อผู้ใช้บริการสุขภาพกับผู้ให้บริการ (คนขับ ผู้ดูแล พยาบาล) ผ่าน AI Agents 7 ตัวที่ทำงานประสานกัน
 
-## React Compiler
+### Core Services
+- **Trip Service** - จองและจัดการการเดินทาง
+- **Medicine Delivery** - ส่งยาถึงที่
+- **Home Care** - ดูแลผู้ป่วยที่บ้าน
+- **Identity & Verification** - ยืนยันตัวตนและสิทธิ์
+- **Hospital Integration** - เชื่อมโรงพยาบาล
+- **Billing & Payments** - คิดค่าบริและชำระเงิน
+- **Notification System** - แจ้งเตือนทุกช่องทาง
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## AI Architecture Documentation
 
-## Expanding the ESLint configuration
+เอกสารออกแบบโครงสร้าง AI ทั้งหมดอยู่ใน [`docs/ai-architecture/`](./docs/ai-architecture/)
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+| เอกสาร | รายละเอียด |
+|--------|-----------|
+| [01-agent-responsibility-matrix.md](./docs/ai-architecture/01-agent-responsibility-matrix.md) | กำหนดหน้าที่ ขอบเขต และการส่งต่องานของแต่ละ Agent |
+| [02-workflow-state-machine.md](./docs/ai-architecture/02-workflow-state-machine.md) | State machine และ workflow การทำงานของระบบ |
+| [03-ai-data-access-policy.md](./docs/ai-architecture/03-ai-data-access-policy.md) | นโยบายการเข้าถึงข้อมูล PII/PHI ของแต่ละ Agent |
+| [04-llm-routing-policy.md](./docs/ai-architecture/04-llm-routing-policy.md) | กลยุทธ์เลือกโมเดล คุมต้นทุน และ fallback |
+| [05-ai-observability-dashboard.md](./docs/ai-architecture/05-ai-observability-dashboard.md) | KPI และ dashboard สำหรับ monitoring |
+
+## Tech Stack
+
+### Frontend
+- React + Vite
+- TailwindCSS
+- React Query / SWR
+
+### Backend & AI
+- Microservices Architecture
+- Event-Driven (RabbitMQ / Apache Kafka)
+- AI Agents (7 specialized agents)
+- LLM Gateway with cost optimization
+
+### Infrastructure
+- Docker + Kubernetes
+- Prometheus + Grafana
+- Jaeger (distributed tracing)
+- Multi-region deployment ready
+
+## เริ่มต้นใช้งาน
+
+```bash
+# ติดตั้ง dependencies
+npm install
+
+# รัน development server
+npm run dev
+
+# Build สำหรับ production
+npm run build
+```
+
+## Project Status
+
+🚧 **กำลังพัฒนา** - Phase 1: AI Architecture Design
+
+---
+*Built with ❤️ for better healthcare coordination*
