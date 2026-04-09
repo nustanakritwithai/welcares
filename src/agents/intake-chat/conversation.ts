@@ -135,7 +135,7 @@ function now(): number {
  */
 function createMessage(
   role: 'assistant' | 'user' | 'system',
-  text: string,
+  content: string,
   options?: {
     quickReplies?: QuickReplyOption[];
     meta?: ChatMessageMeta;
@@ -144,11 +144,11 @@ function createMessage(
   return {
     id: generateMessageId(),
     role,
-    text,
+    content,
     timestamp: now(),
     quickReplies: options?.quickReplies,
     meta: options?.meta,
-  };
+  } as ChatMessage;
 }
 
 /**
@@ -387,8 +387,8 @@ export function generateValidationError(
 /**
  * Create user message
  */
-export function createUserMessage(text: string): ChatMessage {
-  return createMessage('user', text);
+export function createUserMessage(content: string): ChatMessage {
+  return createMessage('user', content);
 }
 
 /**
