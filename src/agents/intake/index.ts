@@ -1,64 +1,61 @@
 /**
- * Intake Agent - Main Export
+ * Intake Agent - Main Exports
+ * WelCares ElderCare Intake System
  * 
- * Intake Agent ทำ 4 อย่าง:
- * 1. รับข้อมูลจากหน้าเว็บ
- * 2. แปลงข้อมูลภาษาคน ให้เป็น structured job spec
- * 3. ตรวจว่าข้อมูลครบหรือยัง → ถามต่อแบบสั้นและตรง
- * 4. ส่ง job spec ต่อให้ backend/service layer
+ * @version 1.0
+ * @module @welcares/intake-agent
  * 
  * @example
- * ```tsx
- * import { useIntakeAgent } from './agents/intake';
+ * ```typescript
+ * // Import everything
+ * import { 
+ *   useIntakeAgent, 
+ *   validateFormData, 
+ *   transformToJobSpec,
+ *   submitIntake,
+ *   IntakeInput,
+ *   JobSpec 
+ * } from './agents/intake';
  * 
- * function BookingForm() {
- *   const { 
- *     formData, 
- *     updateField, 
- *     submitForm, 
- *     isComplete,
- *     nextQuestion,
- *     progress 
- *   } = useIntakeAgent();
- *   
- *   // ใช้งาน...
+ * // Use in React component
+ * function MyForm() {
+ *   const { formData, updateField, submitForm } = useIntakeAgent();
+ *   // ...
  * }
  * ```
  */
 
-// Schema (Source of Truth)
+// ============================================================================
+// SCHEMA - Source of Truth (Types & Constants)
+// ============================================================================
 export * from './schema';
 
-// Legacy Types (backward compatibility)
-export type {
-  IntakeFormData,
-  JobSpec,
-  ServiceType,
-  UrgencyLevel,
-  LocationInfo,
-  ServiceDetails,
-  ScheduleDetails,
-  LocationPair,
-  PatientRequirements,
-  ServiceAddons,
-  JobAssessment,
-  CostEstimate,
-  ResourceNeeds,
-  ValidationError,
-  ValidationResult,
-  FollowUpQuestion,
-  IntakeRequest,
-  IntakeResponse,
-} from './types';
+// ============================================================================
+// TYPES - Extended type definitions
+// ============================================================================
+export * from './types';
 
-// Core Classes
-export { IntakeValidator } from './validator';
-export { IntakeTransformer } from './transformer';
-export { IntakeAgentService, createIntakeAgent, validateIntakeData, transformToJobSpec } from './service';
+// ============================================================================
+// VALIDATOR - Input validation & normalization
+// ============================================================================
+export * from './validator';
 
-// React Hook
+// ============================================================================
+// TRANSFORMER - IntakeInput → JobSpec transformation
+// ============================================================================
+export * from './transformer';
+
+// ============================================================================
+// SERVICE - API communication & business logic
+// ============================================================================
+export * from './service';
+
+// ============================================================================
+// REACT HOOK - State management for React components
+// ============================================================================
 export { useIntakeAgent } from './useIntakeAgent';
-export type { UseIntakeAgentReturn } from './useIntakeAgent';
-
-// Default export
-export { IntakeAgentService as default } from './service';
+export type { 
+  UseIntakeAgentState, 
+  UseIntakeAgentActions, 
+  UseIntakeAgentReturn 
+} from './useIntakeAgent';

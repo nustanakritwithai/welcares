@@ -1,129 +1,484 @@
 /**
- * Intake Agent - React Hook
- * ใช้สำหรับ integrate เข้ากับ React components
+ * Intake Agent - React Hook (MVP)
+ * Custom hook สำหรับจัดการ state และ logic ของ Intake Form
+ * 
+ * @version 1.0
+ * @module src/agents/intake/useIntakeAgent
  */
 
 import { useState, useCallback, useRef } from 'react';
 import type {
-  IntakeFormData,
+  IntakeInput,
+  PartialIntakeInput,
   JobSpec,
-  ValidationResult,
   FollowUpQuestion,
+  ValidationResult,
+  IntakePreviewResult,
+  IntakeSubmitResult,
 } from './types';
-import { IntakeAgentService } from './service';
 
-export interface UseIntakeAgentReturn {
-  // State
-  formData: Partial<IntakeFormData>;
-  isLoading: boolean;
-  error: string | null;
-  validation: ValidationResult | null;
-  progress: { total: number; completed: number; percentage: number };
+import {
+  validateFormData,
+  normalizeInput,
+  ValidateFormDataResult,
+} from './validator';
+
+import {
+  previewIntake,
+  submitIntake,
+} from './service';
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+/**
+ * State ของ Hook
+ */
+export interface UseIntakeAgentState {
+  /** ข้อมูล form ที่กรอก (อาจไม่ครบ) */
+  formData: PartialIntakeInput;
+  /** ข้อมูลครบทั้งหมดหรือไม่ */
   isComplete: boolean;
+  /** รายการ fields ที่ยังขาด */
+  missingFields: string[];
+  /** คำถามถัดไปที่ต้องถามผู้ใช้ */
   nextQuestion: FollowUpQuestion | null;
-  jobSpec: JobSpec | null;
-
-  // Actions
-  updateField: <K extends keyof IntakeFormData>(
-    field: K,
-    value: IntakeFormData[K]
-  ) => Promise<void>;
-  submitForm: () => Promise<JobSpec | null>;
-  reset: () => void;
-  
-  // Session
-  sessionId: string;
+  /** JobSpec preview (ถ้าข้อมูลครบ) */
+  preview: JobSpec | null;
+  /** กำลังประมวลผล */
+  loading: boolean;
+  /** ข้อความ error (ถ้ามี) */
+  error: string | null;
+  /** ส่งข้อมูลสำเร็จ */
+  success: boolean;
 }
 
-export function useIntakeAgent(sessionId?: string): UseIntakeAgentReturn {
-  const agentRef = useRef(new IntakeAgentService(sessionId));
+/**
+ * Actions ของ Hook
+ */
+export interface UseIntakeAgentActions {
+  /** 
+   * Update field เดียว - รองรับ nested path (เช่น 'locations.pickup.address')
+   * @param path - path ของ field (ใช้ dot notation สำหรับ nested)
+   * @param value - ค่าที่จะ set
+   */
+  updateField: (path: string, value: unknown) => void;
+
+  /**
+   * Update หลาย fields พร้อมกัน
+   * @param partial - Partial object ที่ต้องการ merge
+   */
+  updateFields: (partial: Partial<IntakeInput>) => void;
+
+  /**
+   * Validate state ปัจจุบัน
+   * @returns ValidationResult
+   */
+  validateCurrentState: () => Promise<ValidationResult>;
+
+  /**
+   * Preview JobSpec จากข้อมูลปัจจุบัน
+   * @returns IntakePreviewResult
+   */
+  previewJobSpec: () => Promise<IntakePreviewResult>;
+
+  /**
+   * Submit form ไปยัง API
+   * @returns IntakeSubmitResult
+   */
+  submitForm: () => Promise<IntakeSubmitResult>;
+
+  /**
+   * Reset form กลับไปสู่ค่าเริ่มต้น
+   */
+  resetForm: () => void;
+}
+
+/**
+ * Return type ของ hook
+ */
+export type UseIntakeAgentReturn = UseIntakeAgentState & UseIntakeAgentActions;
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
+/** Initial state เริ่มต้น */
+const INITIAL_STATE: UseIntakeAgentState = {
+  formData: {},
+  isComplete: false,
+  missingFields: [],
+  nextQuestion: null,
+  preview: null,
+  loading: false,
+  error: null,
+  success: false,
+};
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+/**
+ * Set nested value ใน object ด้วย path string
+ * เช่น setNestedValue(obj, 'locations.pickup.address', 'value')
+ */
+function setNestedValue<T extends Record<string, unknown>>(
+  obj: T,
+  path: string,
+  value: unknown
+): T {
+  const keys = path.split('.');
+  const result = { ...obj };
   
-  const [formData, setFormData] = useState<Partial<IntakeFormData>>({});
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [validation, setValidation] = useState<ValidationResult | null>(null);
-  const [progress, setProgress] = useState({ total: 7, completed: 0, percentage: 0 });
-  const [isComplete, setIsComplete] = useState(false);
-  const [nextQuestion, setNextQuestion] = useState<FollowUpQuestion | null>(null);
-  const [jobSpec, setJobSpec] = useState<JobSpec | null>(null);
-
-  const updateField = useCallback(async <K extends keyof IntakeFormData>(
-    field: K,
-    value: IntakeFormData[K]
-  ) => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const result = await agentRef.current.processInput(field, value);
-      
-      setFormData(agentRef.current.getCurrentFormData());
-      setValidation(result.validation);
-      setProgress(result.progress);
-      setIsComplete(result.isComplete);
-      setNextQuestion(result.nextQuestion);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาด');
-    } finally {
-      setIsLoading(false);
+  let current: Record<string, unknown> = result;
+  
+  for (let i = 0; i < keys.length - 1; i++) {
+    const key = keys[i];
+    if (!(key in current) || typeof current[key] !== 'object' || current[key] === null) {
+      current[key] = {};
     }
-  }, []);
+    current = current[key] as Record<string, unknown>;
+  }
+  
+  current[keys[keys.length - 1]] = value;
+  return result;
+}
 
-  const submitForm = useCallback(async (): Promise<JobSpec | null> => {
-    if (!isComplete) {
-      setError('กรุณากรอกข้อมูลให้ครบถ้วน');
-      return null;
-    }
+/**
+ * แปลง ValidateFormDataResult เป็น FollowUpQuestion
+ */
+function toFollowUpQuestion(result: ValidateFormDataResult): FollowUpQuestion | null {
+  if (result.missingFields.length === 0 && result.isComplete) {
+    return null;
+  }
 
-    setIsLoading(true);
-    setError(null);
+  const field = result.missingFields[0];
+  if (!field) return null;
 
-    try {
-      const result = await agentRef.current.submitForm(formData as IntakeFormData);
+  // Infer question type from field name
+  const type = inferQuestionType(field);
+
+  return {
+    field,
+    question: result.nextQuestion || `ขอข้อมูล ${field} ด้วยครับ`,
+    type,
+    required: true,
+  };
+}
+
+/**
+ * ประมาณการ type ของคำถามจาก field name
+ */
+function inferQuestionType(field: string): FollowUpQuestion['type'] {
+  if (field.includes('Date')) return 'date';
+  if (field.includes('Time')) return 'time';
+  if (field.includes('Age')) return 'number';
+  if (field.includes('needs') || field.includes('Required')) return 'boolean';
+  if (field.includes('serviceType') || field.includes('mobilityLevel') || field.includes('relationship')) return 'choice';
+  return 'text';
+}
+
+/**
+ * แปลง ValidateFormDataResult เป็น ValidationResult
+ */
+function toValidationResult(result: ValidateFormDataResult): ValidationResult {
+  const total = 15; // ประมาณจำนวน fields ทั้งหมด
+  const completed = Math.max(0, total - result.missingFields.length);
+
+  return {
+    isValid: result.warnings.filter(w => w.severity === 'error').length === 0,
+    isComplete: result.isComplete,
+    errors: result.warnings,
+    missingFields: result.missingFields,
+    followUpQuestions: result.missingFields.map(field => ({
+      field,
+      question: result.nextQuestion || `ขอข้อมูล ${field} ด้วยครับ`,
+      type: inferQuestionType(field),
+      required: true,
+    })),
+    progress: {
+      total,
+      completed,
+      percentage: Math.round((completed / total) * 100),
+    },
+  };
+}
+
+// ============================================================================
+// HOOK
+// ============================================================================
+
+/**
+ * React Hook สำหรับจัดการ Intake Form
+ * 
+ * @example
+ * ```tsx
+ * function IntakeForm() {
+ *   const {
+ *     formData,
+ *     isComplete,
+ *     missingFields,
+ *     nextQuestion,
+ *     preview,
+ *     loading,
+ *     error,
+ *     success,
+ *     updateField,
+ *     updateFields,
+ *     validateCurrentState,
+ *     previewJobSpec,
+ *     submitForm,
+ *     resetForm,
+ *   } = useIntakeAgent();
+ * 
+ *   return (
+ *     <form>
+ *       <input 
+ *         value={formData.contact?.contactName || ''} 
+ *         onChange={(e) => updateField('contact.contactName', e.target.value)}
+ *       />
+ *       {nextQuestion && <p>{nextQuestion.question}</p>}
+ *       {loading && <Spinner />}
+ *       {error && <ErrorMessage message={error} />}
+ *     </form>
+ *   );
+ * }
+ * ```
+ */
+export function useIntakeAgent(): UseIntakeAgentReturn {
+  // State
+  const [formData, setFormData] = useState<PartialIntakeInput>(INITIAL_STATE.formData);
+  const [isComplete, setIsComplete] = useState(INITIAL_STATE.isComplete);
+  const [missingFields, setMissingFields] = useState<string[]>(INITIAL_STATE.missingFields);
+  const [nextQuestion, setNextQuestion] = useState<FollowUpQuestion | null>(INITIAL_STATE.nextQuestion);
+  const [preview, setPreview] = useState<JobSpec | null>(INITIAL_STATE.preview);
+  const [loading, setLoading] = useState(INITIAL_STATE.loading);
+  const [error, setError] = useState<string | null>(INITIAL_STATE.error);
+  const [success, setSuccess] = useState(INITIAL_STATE.success);
+
+  // Ref สำหรับ track abort controller
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  /**
+   * Update field เดียว - รองรับ nested path
+   */
+  const updateField = useCallback((path: string, value: unknown) => {
+    setFormData(prev => {
+      const newFormData = setNestedValue(prev, path, value);
       
-      if (result.success && result.jobSpec) {
-        setJobSpec(result.jobSpec);
-        return result.jobSpec;
-      } else {
-        setError(result.error || 'การส่งข้อมูลล้มเหลว');
-        if (result.validation) {
-          setValidation(result.validation);
-        }
-        return null;
+      // Auto-validate after update
+      const validation = validateFormData(newFormData);
+      setIsComplete(validation.isComplete);
+      setMissingFields(validation.missingFields);
+      setNextQuestion(toFollowUpQuestion(validation));
+      
+      // Clear error when user updates data
+      if (error) setError(null);
+      
+      return newFormData;
+    });
+  }, [error]);
+
+  /**
+   * Update หลาย fields พร้อมกัน
+   */
+  const updateFields = useCallback((partial: Partial<IntakeInput>) => {
+    setFormData(prev => {
+      const newFormData = { ...prev, ...partial };
+      
+      // Deep merge สำหรับ nested objects
+      if (partial.contact) {
+        newFormData.contact = { ...prev.contact, ...partial.contact };
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการส่งข้อมูล');
-      return null;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [formData, isComplete]);
+      if (partial.service) {
+        newFormData.service = { ...prev.service, ...partial.service };
+      }
+      if (partial.schedule) {
+        newFormData.schedule = { ...prev.schedule, ...partial.schedule };
+      }
+      if (partial.locations) {
+        newFormData.locations = {
+          pickup: { ...prev.locations?.pickup, ...partial.locations.pickup },
+          dropoff: { ...prev.locations?.dropoff, ...partial.locations.dropoff },
+        };
+      }
+      if (partial.patient) {
+        newFormData.patient = { ...prev.patient, ...partial.patient };
+      }
+      if (partial.addons) {
+        newFormData.addons = { ...prev.addons, ...partial.addons };
+      }
+      
+      // Auto-validate after update
+      const validation = validateFormData(newFormData);
+      setIsComplete(validation.isComplete);
+      setMissingFields(validation.missingFields);
+      setNextQuestion(toFollowUpQuestion(validation));
+      
+      // Clear error when user updates data
+      if (error) setError(null);
+      
+      return newFormData;
+    });
+  }, [error]);
 
-  const reset = useCallback(() => {
-    agentRef.current.reset();
-    setFormData({});
+  /**
+   * Validate state ปัจจุบัน
+   */
+  const validateCurrentState = useCallback(async (): Promise<ValidationResult> => {
+    setLoading(true);
     setError(null);
-    setValidation(null);
-    setProgress({ total: 7, completed: 0, percentage: 0 });
-    setIsComplete(false);
-    setNextQuestion(null);
-    setJobSpec(null);
+
+    try {
+      // Cancel previous operation if any
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = new AbortController();
+
+      const validation = validateFormData(formData);
+      
+      setIsComplete(validation.isComplete);
+      setMissingFields(validation.missingFields);
+      setNextQuestion(toFollowUpQuestion(validation));
+
+      const result = toValidationResult(validation);
+      return result;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการตรวจสอบข้อมูล';
+      setError(errorMessage);
+      
+      return {
+        isValid: false,
+        isComplete: false,
+        errors: [{ field: 'general', message: errorMessage, severity: 'error' }],
+        missingFields: [],
+        followUpQuestions: [],
+        progress: { total: 15, completed: 0, percentage: 0 },
+      };
+    } finally {
+      setLoading(false);
+    }
+  }, [formData]);
+
+  /**
+   * Preview JobSpec จากข้อมูลปัจจุบัน
+   */
+  const previewJobSpec = useCallback(async (): Promise<IntakePreviewResult> => {
+    setLoading(true);
+    setError(null);
+    setSuccess(false);
+
+    try {
+      // Cancel previous operation if any
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = new AbortController();
+
+      const result = await previewIntake(formData);
+
+      if (result.success && result.jobSpec) {
+        setPreview(result.jobSpec);
+        setIsComplete(true);
+      } else if (result.validation) {
+        setMissingFields(result.validation.missingFields);
+        setNextQuestion(result.validation.followUpQuestions[0] || null);
+      }
+
+      if (result.error) {
+        setError(result.error);
+      }
+
+      return result;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการ preview';
+      setError(errorMessage);
+      
+      return {
+        success: false,
+        error: errorMessage,
+      };
+    } finally {
+      setLoading(false);
+    }
+  }, [formData]);
+
+  /**
+   * Submit form ไปยัง API
+   */
+  const submitForm = useCallback(async (): Promise<IntakeSubmitResult> => {
+    setLoading(true);
+    setError(null);
+    setSuccess(false);
+
+    try {
+      // Cancel previous operation if any
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = new AbortController();
+
+      const result = await submitIntake(formData);
+
+      if (result.success) {
+        setSuccess(true);
+        setPreview(result.jobSpec || null);
+      } else {
+        setError(result.error || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ');
+      }
+
+      return result;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการส่งข้อมูล';
+      setError(errorMessage);
+      
+      return {
+        success: false,
+        error: errorMessage,
+        errorType: 'unknown_error',
+      };
+    } finally {
+      setLoading(false);
+    }
+  }, [formData]);
+
+  /**
+   * Reset form กลับไปสู่ค่าเริ่มต้น
+   */
+  const resetForm = useCallback(() => {
+    // Cancel any pending operation
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+
+    setFormData(INITIAL_STATE.formData);
+    setIsComplete(INITIAL_STATE.isComplete);
+    setMissingFields(INITIAL_STATE.missingFields);
+    setNextQuestion(INITIAL_STATE.nextQuestion);
+    setPreview(INITIAL_STATE.preview);
+    setLoading(INITIAL_STATE.loading);
+    setError(INITIAL_STATE.error);
+    setSuccess(INITIAL_STATE.success);
   }, []);
 
   return {
+    // State
     formData,
-    isLoading,
-    error,
-    validation,
-    progress,
     isComplete,
+    missingFields,
     nextQuestion,
-    jobSpec,
+    preview,
+    loading,
+    error,
+    success,
+    // Actions
     updateField,
+    updateFields,
+    validateCurrentState,
+    previewJobSpec,
     submitForm,
-    reset,
-    sessionId: agentRef.current.getSessionId(),
+    resetForm,
   };
 }
+
+// ============================================================================
+// EXPORTS
+// ============================================================================
 
 export default useIntakeAgent;

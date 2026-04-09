@@ -1,175 +1,85 @@
 /**
- * Intake Agent - Types & Interfaces
- * กำหนดโครงสร้างข้อมูลสำหรับ Job Specification
+ * Intake Agent - Types (WelCares)
+ * Type definitions สำหรับระบบ WelCares ElderCare
+ * 
+ * @version 1.0
+ * @see schema.ts สำหรับ source of truth
  */
 
-// ==================== INPUT TYPES ====================
+// Re-export ทั้งหมดจาก schema.ts เพื่อใช้เป็น types หลัก
+export * from './schema';
 
-export interface IntakeFormData {
-  // บริการที่ต้องการ
-  serviceType: ServiceType | '';
-  
-  // วันและเวลา
-  appointmentDate: string; // YYYY-MM-DD
-  appointmentTime: string; // HH:mm
-  
-  // สถานที่
-  pickupLocation: LocationInfo;
-  dropoffLocation: LocationInfo;
-  
-  // ผู้ป่วย
-  patientNeedsEscort: boolean | null;
-  needsWheelchair: boolean | null;
-  
-  // บริการเสริม
-  needsMedicinePickup: boolean | null;
-  needsHomeCare: boolean | null;
-  
-  // ข้อมูลเพิ่มเติม
-  specialNotes: string;
-  urgency: UrgencyLevel;
-}
+// Additional types สำหรับ internal use
 
-export type ServiceType = 
-  | 'hospital-visit'      // พบแพทย์นอก
-  | 'follow-up'           // ติดตามอาการ
-  | 'physical-therapy'    // กายภาพบำบัด
-  | 'dialysis'            // ล้างไต
-  | 'chemotherapy'        // เคมีบำบัด
-  | 'checkup'             // ตรวจสุขภาพ
-  | 'other';              // อื่นๆ
-
-export type UrgencyLevel = 
-  | 'low'      // นัดล่วงหน้า 3+ วัน
-  | 'normal'   // นัดล่วงหน้า 1-2 วัน
-  | 'high'     // พรุ่งนี้
-  | 'urgent';  // วันนี้ / ฉุกเฉิน
-
-export interface LocationInfo {
-  address: string;
-  lat?: number;
-  lng?: number;
-  contactName: string;
-  contactPhone: string;
-  buildingName?: string;
-  floor?: string;
-  roomNumber?: string;
-  landmarks?: string;
-}
-
-// ==================== JOB SPEC (OUTPUT) ====================
-
-export interface JobSpec {
-  jobId: string;
-  version: string;
-  createdAt: string;
-  status: 'draft' | 'pending' | 'confirmed' | 'cancelled';
-  
-  // ข้อมูลบริการ
-  service: ServiceDetails;
-  
-  // ข้อมูลเวลา
-  schedule: ScheduleDetails;
-  
-  // ข้อมูลสถานที่
-  locations: LocationPair;
-  
-  // ข้อมูลผู้ป่วย
-  patient: PatientRequirements;
-  
-  // บริการเสริม
-  addons: ServiceAddons;
-  
-  // การประเมิน
-  assessment: JobAssessment;
-}
-
-export interface ServiceDetails {
-  type: ServiceType;
-  typeLabel: string;
-  category: 'medical' | 'therapy' | 'checkup' | 'other';
-  estimatedDuration: number; // นาที
-  priority: 1 | 2 | 3 | 4 | 5; // 1 = สูงสุด
-}
-
-export interface ScheduleDetails {
-  date: string;      // YYYY-MM-DD
-  time: string;      // HH:mm
-  datetime: string;  // ISO 8601
-  flexibility: 'strict' | '30min' | '1hour' | 'anytime';
-}
-
-export interface LocationPair {
-  pickup: LocationInfo;
-  dropoff: LocationInfo;
-  estimatedDistance?: number; // km
-  estimatedDuration?: number; // นาที
-}
-
-export interface PatientRequirements {
-  needsEscort: boolean;
-  needsWheelchair: boolean;
-  mobilityLevel: 'independent' | 'assisted' | 'wheelchair' | 'bedridden';
-  specialAccommodations: string[];
-}
-
-export interface ServiceAddons {
-  medicinePickup: boolean;
-  homeCare: boolean;
-  mealService: boolean;
-  interpretation: boolean;
-}
-
-export interface JobAssessment {
-  urgencyLevel: UrgencyLevel;
-  complexity: 'simple' | 'moderate' | 'complex' | 'critical';
-  estimatedCost: CostEstimate;
-  resourceRequirements: ResourceNeeds;
-  riskFactors: string[];
-}
-
-export interface CostEstimate {
-  base: number;           // ฿
-  distance: number;       // ฿
-  duration: number;       // ฿
-  addons: number;         // ฿
-  total: number;          // ฿
-  currency: 'THB';
-}
-
-export interface ResourceNeeds {
-  navigatorRequired: boolean;
-  vehicleType: 'sedan' | 'mpv' | 'wheelchair-van' | 'ambulance';
-  estimatedNavHours: number;
-  specialEquipment: string[];
-}
-
-// ==================== VALIDATION ====================
-
-export interface ValidationError {
-  field: string;
-  message: string;
-  severity: 'error' | 'warning';
-}
-
+/**
+ * ผลลัพธ์การ validate form data
+ */
 export interface ValidationResult {
   isValid: boolean;
   isComplete: boolean;
   errors: ValidationError[];
   missingFields: string[];
   followUpQuestions: FollowUpQuestion[];
+  progress: {
+    total: number;
+    completed: number;
+    percentage: number;
+  };
 }
 
+/**
+ * Error จากการ validate
+ */
+export interface ValidationError {
+  field: string;
+  message: string;
+  severity: 'error' | 'warning';
+}
+
+/**
+ * คำถามติดตามที่ต้องถามผู้ใช้
+ */
 export interface FollowUpQuestion {
   field: string;
   question: string;
-  type: 'boolean' | 'text' | 'choice' | 'date' | 'time';
+  type: 'text' | 'boolean' | 'choice' | 'date' | 'time' | 'number';
   options?: string[];
   required: boolean;
 }
 
-// ==================== API TYPES ====================
+/**
+ * ผลลัพธ์การ preview ก่อน submit
+ */
+export interface IntakePreviewResult {
+  success: boolean;
+  jobSpec?: JobSpec;
+  validation?: ValidationResult;
+  error?: string;
+}
 
+/**
+ * ผลลัพธ์การ submit form
+ */
+export interface IntakeSubmitResult {
+  success: boolean;
+  jobId?: string;
+  jobSpec?: JobSpec;
+  error?: string;
+  errorType?: 'validation_error' | 'network_error' | 'timeout_error' | 'server_error' | 'unknown_error';
+}
+
+/**
+ * Request สำหรับ intake API
+ */
+export interface IntakeRequest {
+  input: Partial<IntakeInput>;
+  sessionId: string;
+  previousQuestions?: FollowUpQuestion[];
+}
+
+/**
+ * Response จาก intake API
+ */
 export interface IntakeResponse {
   success: boolean;
   jobSpec?: JobSpec;
@@ -177,8 +87,82 @@ export interface IntakeResponse {
   error?: string;
 }
 
-export interface IntakeRequest {
-  formData: Partial<IntakeFormData>;
-  sessionId: string;
-  previousQuestions?: FollowUpQuestion[];
+// ============================================================================
+// Internal/Working Types
+// ============================================================================
+
+/**
+ * Form data แบบ step-by-step (incomplete)
+ */
+export type PartialIntakeInput = Partial<IntakeInput>;
+
+/**
+ * Field path สำหรับ nested access
+ * เช่น 'contact.contactName', 'locations.pickup.address'
+ */
+export type FieldPath = string;
+
+/**
+ * Hook state สำหรับ React
+ */
+export interface IntakeHookState {
+  formData: Partial<IntakeInput>;
+  isComplete: boolean;
+  missingFields: string[];
+  nextQuestion: FollowUpQuestion | null;
+  preview: JobSpec | null;
+  loading: boolean;
+  error: string | null;
+  success: boolean;
+}
+
+/**
+ * Hook actions สำหรับ React
+ */
+export interface IntakeHookActions {
+  updateField: <K extends keyof IntakeInput>(field: K, value: IntakeInput[K]) => Promise<void>;
+  updateFields: (partial: Partial<IntakeInput>) => void;
+  validateCurrentState: () => Promise<ValidationResult>;
+  previewJobSpec: () => Promise<IntakePreviewResult>;
+  submitForm: () => Promise<IntakeSubmitResult>;
+  resetForm: () => void;
+}
+
+/**
+ * รวม Hook state + actions
+ */
+export type UseIntakeAgentReturn = IntakeHookState & IntakeHookActions;
+
+// ============================================================================
+// Service Layer Types
+// ============================================================================
+
+/**
+ * Config สำหรับ intake service
+ */
+export interface IntakeServiceConfig {
+  baseUrl: string;
+  timeout: number;
+  retryAttempts: number;
+  retryDelay: number;
+}
+
+/**
+ * Error types สำหรับ service layer
+ */
+export type ServiceErrorType = 
+  | 'validation_error' 
+  | 'network_error' 
+  | 'timeout_error'
+  | 'server_error' 
+  | 'unknown_error';
+
+/**
+ * Service error
+ */
+export interface ServiceError {
+  type: ServiceErrorType;
+  message: string;
+  statusCode?: number;
+  retryable: boolean;
 }
