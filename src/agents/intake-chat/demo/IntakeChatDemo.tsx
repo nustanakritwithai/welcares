@@ -240,6 +240,8 @@ const quickFormStyles: Record<string, React.CSSProperties> = {
     borderRadius: '10px',
     border: '1px solid #7F77DD',
     fontSize: '15px',
+    color: '#333',  // <-- สีตัวหนังสือเข้ม
+    backgroundColor: '#fff',  // <-- พื้นหลังขาว
     boxSizing: 'border-box' as const,
   },
   buttons: {
@@ -1253,6 +1255,8 @@ const apiKeyStyles: Record<string, React.CSSProperties> = {
     border: '1px solid #4CAF50',
     fontSize: '14px',
     fontFamily: 'monospace',
+    color: '#333',  // <-- สีตัวหนังสือเข้ม
+    backgroundColor: '#fff',  // <-- พื้นหลังขาว
     boxSizing: 'border-box' as const,
     marginBottom: '12px',
   },
