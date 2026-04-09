@@ -13,7 +13,7 @@ import type {
   IntakeFormData,
   JobSpec,
 } from './types';
-import type { PartialIntakeInput } from '../intake/types';
+import type { PartialIntakeInput, IntakeInput } from '../intake/types';
 import { validateFormData, type ValidateFormDataResult } from '../intake/validator';
 import { previewIntake, submitIntake } from '../intake/service';
 import { parseInput, detectIntent, applyParsedAnswer } from './parser';
@@ -379,6 +379,16 @@ export function useIntakeChatAgent(
       }
     }, 100);
   }, []);
+
+  /**
+   * Update a single field directly
+   */
+  const updateField = useCallback(<K extends keyof IntakeInput>(field: K, value: IntakeInput[K]) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value,
+    }));
+  }, []);
   
   // ============================================================================
   // RETURN
@@ -391,6 +401,7 @@ export function useIntakeChatAgent(
     sendMessage,
     selectQuickReply,
     resetConversation,
+    updateField,
     formData: formData as IntakeFormData,
     preview,
     isComplete,

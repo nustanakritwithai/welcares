@@ -20,6 +20,267 @@ import {
 } from '../../intake/schema';
 
 // ============================================================================
+// Quick Form Component
+// ============================================================================
+
+interface QuickFormProps {
+  onFillField: (field: string, value: string) => void;
+  formData: Partial<IntakeInput>;
+}
+
+const QuickForm: React.FC<QuickFormProps> = ({ onFillField, formData }) => {
+  const [activeField, setActiveField] = useState<string | null>(null);
+  const [inputValue, setInputValue] = useState('');
+
+  const fields = [
+    { key: 'contact.contactName', label: 'ชื่อผู้ติดต่อ', icon: '👤' },
+    { key: 'contact.contactPhone', label: 'เบอร์โทร', icon: '📞' },
+    { key: 'service.serviceType', label: 'บริการ', icon: '🏥', type: 'select', options: [
+      { value: 'hospital-visit', label: 'พบแพทย์' },
+      { value: 'follow-up', label: 'ติดตามอาการ' },
+      { value: 'physical-therapy', label: 'กายภาพ' },
+      { value: 'dialysis', label: 'ล้างไต' },
+      { value: 'checkup', label: 'ตรวจสุขภาพ' },
+      { value: 'vaccination', label: 'วัคซีน' },
+      { value: 'other', label: 'อื่นๆ' },
+    ]},
+    { key: 'schedule.appointmentDate', label: 'วันที่', icon: '📅', type: 'date' },
+    { key: 'schedule.appointmentTime', label: 'เวลา', icon: '🕐', type: 'time' },
+    { key: 'locations.pickup.address', label: 'รับจาก', icon: '📍' },
+    { key: 'locations.dropoff.address', label: 'ส่งที่', icon: '🏥' },
+    { key: 'patient.name', label: 'ชื่อผู้ป่วย', icon: '🧑‍⚕️' },
+    { key: 'patient.mobilityLevel', label: 'การเคลื่อนไหว', icon: '♿', type: 'select', options: [
+      { value: 'independent', label: 'เดินได้เอง' },
+      { value: 'assisted', label: 'ต้องช่วยพยุง' },
+      { value: 'wheelchair', label: 'ใช้รถเข็น' },
+      { value: 'bedridden', label: 'ติดเตียง' },
+    ]},
+  ];
+
+  const handleSubmit = () => {
+    if (activeField && inputValue.trim()) {
+      onFillField(activeField, inputValue.trim());
+      setInputValue('');
+      setActiveField(null);
+    }
+  };
+
+  const getCurrentValue = (fieldKey: string) => {
+    const parts = fieldKey.split('.');
+    let value: unknown = formData;
+    for (const part of parts) {
+      value = (value as Record<string, unknown>)?.[part];
+    }
+    return value as string | undefined;
+  };
+
+  return (
+    <div style={quickFormStyles.container}>
+      <div style={quickFormStyles.header}>
+        <span style={quickFormStyles.headerIcon}>📝</span>
+        <span style={quickFormStyles.headerText}>กรอกข้อมูลเร็ว</span>
+      </div>
+      <div style={quickFormStyles.fields}>
+        {fields.map((field) => {
+          const currentValue = getCurrentValue(field.key);
+          const isActive = activeField === field.key;
+          
+          if (isActive && field.type === 'select') {
+            return (
+              <div key={field.key} style={quickFormStyles.activeField}>
+                <span style={quickFormStyles.fieldLabel}>{field.icon} {field.label}</span>
+                <div style={quickFormStyles.selectOptions}>
+                  {field.options?.map((opt) => (
+                    <button
+                      key={opt.value}
+                      style={quickFormStyles.optionButton}
+                      onClick={() => {
+                        onFillField(field.key, opt.value);
+                        setActiveField(null);
+                      }}
+                      type="button"
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                  <button
+                    style={quickFormStyles.cancelButton}
+                    onClick={() => setActiveField(null)}
+                    type="button"
+                  >
+                    ❌ ยกเลิก
+                  </button>
+                </div>
+              </div>
+            );
+          }
+          
+          if (isActive) {
+            return (
+              <div key={field.key} style={quickFormStyles.activeField}>
+                <span style={quickFormStyles.fieldLabel}>{field.icon} {field.label}</span>
+                <input
+                  type={field.type || 'text'}
+                  style={quickFormStyles.input}
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+                  autoFocus
+                  placeholder={`กรอก${field.label}...`}
+                />
+                <div style={quickFormStyles.buttons}>
+                  <button style={quickFormStyles.submitButton} onClick={handleSubmit} type="button">
+                    ✅ บันทึก
+                  </button>
+                  <button style={quickFormStyles.cancelButton} onClick={() => setActiveField(null)} type="button">
+                    ❌ ยกเลิก
+                  </button>
+                </div>
+              </div>
+            );
+          }
+          
+          return (
+            <button
+              key={field.key}
+              style={{
+                ...quickFormStyles.fieldButton,
+                ...(currentValue ? quickFormStyles.filledField : {}),
+              }}
+              onClick={() => {
+                setActiveField(field.key);
+                setInputValue(currentValue || '');
+              }}
+              type="button"
+            >
+              <span>{field.icon}</span>
+              <span style={quickFormStyles.fieldText}>
+                {currentValue || field.label}
+              </span>
+              {currentValue && <span style={quickFormStyles.checkmark}>✓</span>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const quickFormStyles: Record<string, React.CSSProperties> = {
+  container: {
+    backgroundColor: '#fff',
+    borderRadius: '16px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+    margin: '12px 16px',
+    overflow: 'hidden',
+  },
+  header: {
+    backgroundColor: '#7F77DD',
+    color: '#fff',
+    padding: '12px 16px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  headerIcon: {
+    fontSize: '18px',
+  },
+  headerText: {
+    fontWeight: 'bold',
+    fontSize: '15px',
+  },
+  fields: {
+    padding: '12px',
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    gap: '8px',
+  },
+  fieldButton: {
+    padding: '10px 12px',
+    borderRadius: '10px',
+    border: '1px solid #E5E5E5',
+    backgroundColor: '#F8F9FA',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '13px',
+    transition: 'all 0.2s',
+    textAlign: 'left' as const,
+  },
+  filledField: {
+    backgroundColor: '#E8F5E9',
+    borderColor: '#4CAF50',
+  },
+  fieldText: {
+    flex: 1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap' as const,
+  },
+  checkmark: {
+    color: '#4CAF50',
+    fontWeight: 'bold',
+  },
+  activeField: {
+    gridColumn: '1 / -1',
+    padding: '12px',
+    backgroundColor: '#F0EEFC',
+    borderRadius: '12px',
+  },
+  fieldLabel: {
+    display: 'block',
+    marginBottom: '8px',
+    fontWeight: 500,
+    color: '#333',
+  },
+  input: {
+    width: '100%',
+    padding: '12px',
+    borderRadius: '10px',
+    border: '1px solid #7F77DD',
+    fontSize: '15px',
+    boxSizing: 'border-box' as const,
+  },
+  buttons: {
+    display: 'flex',
+    gap: '8px',
+    marginTop: '12px',
+  },
+  submitButton: {
+    flex: 1,
+    padding: '10px',
+    backgroundColor: '#7F77DD',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontWeight: 500,
+  },
+  cancelButton: {
+    padding: '10px 16px',
+    backgroundColor: '#F0F0F0',
+    color: '#666',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+  },
+  selectOptions: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: '6px',
+  },
+  optionButton: {
+    padding: '10px 12px',
+    backgroundColor: '#fff',
+    border: '1px solid #E5E5E5',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    textAlign: 'left' as const,
+  },
+};
+
+// ============================================================================
 // Constants
 // ============================================================================
 
@@ -281,9 +542,11 @@ export const IntakeChatDemo: React.FC<IntakeChatDemoProps> = ({
     selectQuickReply,
     confirmBooking,
     restart,
+    updateField,
   } = useIntakeChatAgent();
 
   const [inputText, setInputText] = useState('');
+  const [showQuickForm, setShowQuickForm] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -328,6 +591,41 @@ export const IntakeChatDemo: React.FC<IntakeChatDemoProps> = ({
     if (jobId) {
       onComplete?.(jobId);
     }
+  };
+
+  // Handle direct form field fill from QuickForm
+  const handleFillField = (fieldKey: string, value: string) => {
+    // Parse field key like "contact.contactName" to nested object path
+    const parts = fieldKey.split('.');
+    
+    if (parts.length === 1) {
+      // Simple field at root level
+      updateField(parts[0] as keyof IntakeInput, value as IntakeInput[keyof IntakeInput]);
+    } else if (parts.length === 2) {
+      // Nested field like "contact.contactName"
+      const [parent, child] = parts;
+      const currentParent = (formData[parent as keyof IntakeInput] as Record<string, unknown>) || {};
+      updateField(
+        parent as keyof IntakeInput,
+        { ...currentParent, [child]: value } as IntakeInput[keyof IntakeInput]
+      );
+    }
+    
+    // Also send a confirmation message to the chat
+    const fieldLabels: Record<string, string> = {
+      'contact.contactName': 'ชื่อผู้ติดต่อ',
+      'contact.contactPhone': 'เบอร์โทร',
+      'service.serviceType': 'บริการ',
+      'schedule.appointmentDate': 'วันนัด',
+      'schedule.appointmentTime': 'เวลา',
+      'locations.pickup.address': 'จุดรับ',
+      'locations.dropoff.address': 'จุดส่ง',
+      'patient.name': 'ชื่อผู้ป่วย',
+      'patient.mobilityLevel': 'การเคลื่อนไหว',
+    };
+    
+    const label = fieldLabels[fieldKey] || fieldKey;
+    sendMessage(`${label}: ${value}`);
   };
 
   const isAwaitingConfirmation = status === 'awaitingConfirmation';
@@ -391,6 +689,25 @@ export const IntakeChatDemo: React.FC<IntakeChatDemoProps> = ({
             onClose={onCancel}
           />
         </div>
+      )}
+
+      {/* Quick Form Toggle */}
+      {!isSuccess && !isAwaitingConfirmation && (
+        <button
+          style={styles.quickFormToggle}
+          onClick={() => setShowQuickForm(!showQuickForm)}
+          type="button"
+        >
+          {showQuickForm ? '📋 ซ่อนแบบฟอร์ม' : '📝 กรอกข้อมูลเร็ว'}
+        </button>
+      )}
+
+      {/* Quick Form */}
+      {showQuickForm && !isSuccess && !isAwaitingConfirmation && (
+        <QuickForm
+          formData={formData}
+          onFillField={handleFillField}
+        />
       )}
 
       {/* Input Area */}
@@ -791,6 +1108,24 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     gap: '12px',
     justifyContent: 'center',
+  },
+
+  // Quick Form Toggle
+  quickFormToggle: {
+    margin: '8px 16px 0',
+    padding: '10px 16px',
+    backgroundColor: '#F0EEFC',
+    color: '#7F77DD',
+    border: '1px solid #7F77DD',
+    borderRadius: '12px',
+    fontSize: '14px',
+    fontWeight: 500,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px',
+    transition: 'all 0.2s',
   },
 };
 
