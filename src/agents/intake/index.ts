@@ -26,7 +26,10 @@
  * ```
  */
 
-// Types
+// Schema (Source of Truth)
+export * from './schema';
+
+// Legacy Types (backward compatibility)
 export type {
   IntakeFormData,
   JobSpec,
