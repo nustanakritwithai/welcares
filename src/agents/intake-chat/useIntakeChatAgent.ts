@@ -226,8 +226,9 @@ export function useIntakeChatAgent(
       let parsed;
       let aiResponse: string | undefined;
       
-      if (isAIConfigured()) {
-        try {
+      try {
+        const aiEnabled = await isAIConfigured();
+        if (aiEnabled) {
           const aiResult = await parseMessageWithAI(text, formData, messages.map(m => m.content));
           if (aiResult.confidence > 0.6 && aiResult.field && aiResult.value !== undefined) {
             parsed = {
@@ -237,9 +238,9 @@ export function useIntakeChatAgent(
             };
             aiResponse = aiResult.response;
           }
-        } catch (aiError) {
-          console.error('AI parsing failed:', aiError);
         }
+      } catch (aiError) {
+        console.error('AI parsing failed:', aiError);
       }
       
       // Fallback to rule-based parsing if AI fails or not configured
@@ -300,8 +301,9 @@ export function useIntakeChatAgent(
         // Continue with next question - try AI first
         let nextQuestion: ChatMessage | null = null;
         
-        if (isAIConfigured()) {
-          try {
+        try {
+          const aiEnabled = await isAIConfigured();
+          if (aiEnabled) {
             const aiResult = await generateAIResponse(
               text,
               newFormData,
@@ -318,9 +320,9 @@ export function useIntakeChatAgent(
                 quickReplies: aiResult.quickReplies,
               } as ChatMessage;
             }
-          } catch (aiError) {
-            console.error('AI response generation failed:', aiError);
           }
+        } catch (aiError) {
+          console.error('AI response generation failed:', aiError);
         }
         
         // Fallback to rule-based

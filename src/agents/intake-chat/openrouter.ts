@@ -1,8 +1,8 @@
 /**
- * OpenRouter AI Service
- * OpenAI-compatible SDK pattern สำหรับ WelCares Intake Agent
+ * OpenRouter AI Service (Backend Proxy)
+ * Frontend calls local API → Server proxies to OpenRouter (API key hidden)
  * 
- * @version 2.0 - OpenAI SDK Pattern
+ * @version 3.0 - Backend Proxy Pattern
  * @module src/agents/intake-chat/openrouter
  */
 
@@ -11,8 +11,6 @@ import type { PartialIntakeInput } from '../intake/types';
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
-
-const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
 // Model definitions - OpenRouter format: provider/model-name
 export const MODELS = {
@@ -26,6 +24,9 @@ export const MODELS = {
 
 // Default model for chat completions
 const DEFAULT_MODEL = MODELS.NEMOTRON;
+
+// Backend API base URL (same origin in production, /api for dev proxy)
+const API_BASE_URL = import.meta.env.DEV ? '/api' : '';
 
 // ============================================================================
 // TYPES - OpenAI-compatible
@@ -66,9 +67,6 @@ export interface AIClient {
       create: (params: ChatCompletionRequest) => Promise<ChatCompletionResponse>;
     };
   };
-  embeddings?: {
-    create: (params: { model: string; input: string | string[] }) => Promise<{ data: Array<{ embedding: number[] }> }>;
-  };
 }
 
 export interface ParsedIntent {
@@ -81,11 +79,12 @@ export interface ParsedIntent {
 }
 
 // ============================================================================
-// CLIENT FACTORY - OpenAI SDK Pattern
+// CLIENT FACTORY - OpenAI SDK Pattern (calls backend proxy)
 // ============================================================================
 
 /**
  * Get AI Client - Factory function คล้าย OpenAI SDK
+ * แต่เรียกผ่าน backend proxy แทน (ไม่ expose API key)
  * 
  * Usage:
  * const client = getAIClient();
@@ -95,39 +94,21 @@ export interface ParsedIntent {
  * });
  */
 export function getAIClient(): AIClient {
-  // Support both naming conventions: Nemotron_API (backend pattern) or VITE_OPENROUTER_API_KEY (frontend)
-  const apiKey = import.meta.env.Nemotron_API || import.meta.env.VITE_OPENROUTER_API_KEY || '';
-  const baseURL = import.meta.env.VITE_OPENROUTER_BASE_URL || OPENROUTER_BASE_URL;
-
-  if (!apiKey) {
-    console.warn('[OpenRouter] No API key configured. AI features disabled.');
-  }
-
   return {
     chat: {
       completions: {
         create: async (params: ChatCompletionRequest): Promise<ChatCompletionResponse> => {
-          if (!apiKey) {
-            throw new Error('OpenRouter API key not configured');
-          }
-
-          const response = await fetch(`${baseURL}/chat/completions`, {
+          const response = await fetch(`${API_BASE_URL}/chat/completions`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${apiKey}`,
-              'HTTP-Referer': window.location.origin,
-              'X-Title': 'WelCares Intake Chat',
             },
-            body: JSON.stringify({
-              ...params,
-              temperature: params.temperature ?? 0.3,
-            }),
+            body: JSON.stringify(params),
           });
 
           if (!response.ok) {
-            const error = await response.text();
-            throw new Error(`OpenRouter API error: ${response.status} - ${error}`);
+            const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+            throw new Error(error.error || `API error: ${response.status}`);
           }
 
           return await response.json();
@@ -138,10 +119,16 @@ export function getAIClient(): AIClient {
 }
 
 /**
- * Check if AI is configured
+ * Check if AI is configured (server-side)
  */
-export function isAIConfigured(): boolean {
-  return !!(import.meta.env.Nemotron_API || import.meta.env.VITE_OPENROUTER_API_KEY);
+export async function isAIConfigured(): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/health`);
+    const data = await response.json();
+    return data.aiConfigured === true;
+  } catch {
+    return false;
+  }
 }
 
 // ============================================================================
@@ -203,10 +190,6 @@ export async function parseMessageWithAI(
   currentFormData: PartialIntakeInput,
   _context: string[] = []
 ): Promise<ParsedIntent> {
-  if (!isAIConfigured()) {
-    return { intent: 'unknown', confidence: 0 };
-  }
-
   const client = getAIClient();
 
   try {
@@ -255,10 +238,6 @@ export async function generateAIResponse(
   missingFields: string[],
   _context: string[] = []
 ): Promise<{ content: string; quickReplies?: Array<{ label: string; value: string }> }> {
-  if (!isAIConfigured()) {
-    return { content: '' };
-  }
-
   const client = getAIClient();
 
   try {
@@ -294,7 +273,7 @@ ${JSON.stringify(currentFormData, null, 2)}
 // EXPORTS
 // ============================================================================
 
-export { OPENROUTER_BASE_URL, DEFAULT_MODEL };
+export { DEFAULT_MODEL, API_BASE_URL };
 
 export default {
   getAIClient,
