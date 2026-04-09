@@ -39,11 +39,14 @@ interface MessageBubbleProps {
 const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onQuickReply }) => {
   const isAssistant = message.role === 'assistant';
   const isSystem = message.role === 'system';
+  const messageContent = (message as ChatMessage & { text?: string }).content
+    ?? (message as ChatMessage & { text?: string }).text
+    ?? '';
 
   if (isSystem) {
     return (
       <div style={styles.systemMessage}>
-        {message.content}
+        {messageContent}
       </div>
     );
   }
@@ -61,7 +64,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onQuickReply }) 
           ...(isAssistant ? styles.assistantBubble : styles.userBubble),
         }}
       >
-        <p style={styles.messageText}>{message.content}</p>
+        <p style={styles.messageText}>{messageContent}</p>
         
         {message.quickReplies && message.quickReplies.length > 0 && onQuickReply && (
           <div style={styles.quickRepliesContainer}>
@@ -275,12 +278,14 @@ export const IntakeChatDemo: React.FC<IntakeChatDemoProps> = ({
     messages,
     status,
     isTyping,
+    awaitingConfirmation,
+    success,
     formData,
     jobId,
     sendMessage,
     selectQuickReply,
     confirmBooking,
-    restart,
+    resetConversation,
   } = useIntakeChatAgent();
 
   const [inputText, setInputText] = useState('');
@@ -313,25 +318,28 @@ export const IntakeChatDemo: React.FC<IntakeChatDemoProps> = ({
 
   const handleQuickReply = async (reply: QuickReply) => {
     if (reply.value === 'restart') {
-      restart();
+      resetConversation();
       return;
     }
     if (reply.value === 'close') {
       onCancel?.();
       return;
     }
-    await selectQuickReply(reply);
+    await Promise.resolve(selectQuickReply(reply));
   };
 
   const handleConfirm = async () => {
     await confirmBooking();
-    if (jobId) {
-      onComplete?.(jobId);
-    }
   };
 
-  const isAwaitingConfirmation = status === 'awaitingConfirmation';
-  const isSuccess = status === 'success';
+  useEffect(() => {
+    if (success && jobId) {
+      onComplete?.(jobId);
+    }
+  }, [success, jobId, onComplete]);
+
+  const isAwaitingConfirmation = awaitingConfirmation || status === 'awaitingConfirmation';
+  const isSuccess = success || status === 'success';
 
   return (
     <div style={styles.container} className={className}>
@@ -348,7 +356,7 @@ export const IntakeChatDemo: React.FC<IntakeChatDemoProps> = ({
           {!isSuccess && (
             <button
               style={styles.restartButton}
-              onClick={restart}
+              onClick={resetConversation}
               title="เริ่มใหม่"
               type="button"
             >
@@ -387,7 +395,9 @@ export const IntakeChatDemo: React.FC<IntakeChatDemoProps> = ({
         <div style={styles.successOverlay}>
           <SuccessView
             jobId={jobId}
-            onRestart={restart}
+            onRestart={() => {
+              resetConversation();
+            }}
             onClose={onCancel}
           />
         </div>

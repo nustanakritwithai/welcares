@@ -116,6 +116,7 @@ export function useIntakeChatAgent(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [jobId, setJobId] = useState<string | null>(null);
   
   // Refs for tracking state
   const isProcessingRef = useRef(false);
@@ -299,6 +300,7 @@ export function useIntakeChatAgent(
       
       if (result.success && result.jobId) {
         setSuccess(true);
+        setJobId(result.jobId);
         setAwaitingConfirmation(false);
         onSuccess?.(result.jobId);
         addMessage(generateSubmissionSuccess(result.jobId));
@@ -352,6 +354,7 @@ export function useIntakeChatAgent(
     setAwaitingConfirmation(false);
     setError(null);
     setSuccess(false);
+    setJobId(null);
     setInputText('');
     isProcessingRef.current = false;
     lastValidationRef.current = null;
@@ -387,6 +390,17 @@ export function useIntakeChatAgent(
     loading,
     error,
     success,
+    jobId,
+    status: success
+      ? 'success'
+      : awaitingConfirmation
+        ? 'awaitingConfirmation'
+        : loading
+          ? 'submitting'
+          : 'collecting',
+    isTyping: loading,
+    confirmBooking: handleConfirm,
+    restart: resetConversation,
   };
 }
 
