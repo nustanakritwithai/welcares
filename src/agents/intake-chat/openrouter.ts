@@ -1,73 +1,29 @@
 /**
- * OpenRouter AI Service (Backend Proxy)
- * Frontend calls local API → Server proxies to OpenRouter (API key hidden)
+ * OpenRouter AI Service (DISABLED for GitHub Pages deployment)
+ * Using rule-based fallback only - no backend required
  * 
- * @version 3.0 - Backend Proxy Pattern
+ * @version 3.1 - Static Site Mode (GitHub Pages)
  * @module src/agents/intake-chat/openrouter
  */
 
 import type { PartialIntakeInput } from '../intake/types';
 
 // ============================================================================
-// CONFIGURATION
+// CONFIGURATION - DISABLED
 // ============================================================================
 
-// Model definitions - OpenRouter format: provider/model-name
+// Model definitions kept for reference but not used
 export const MODELS = {
   NEMOTRON: 'nvidia/nemotron-3-super-120b-a12b:free',
   GPT4O_MINI: 'openai/gpt-4o-mini',
   GPT4O: 'openai/gpt-4o',
   CLAUDE_HAIKU: 'anthropic/claude-3.5-haiku',
   DEEPSEEK: 'deepseek/deepseek-chat',
-  EMBED: 'nvidia/llama-nemotron-embed-vl-1b-v2:free',
 } as const;
 
-// Default model for chat completions
-const DEFAULT_MODEL = MODELS.NEMOTRON;
-
-// Backend API base URL (same origin in production, /api for dev proxy)
-const API_BASE_URL = import.meta.env.DEV ? '/api' : '';
-
 // ============================================================================
-// TYPES - OpenAI-compatible
+// TYPES
 // ============================================================================
-
-export interface ChatCompletionMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
-
-export interface ChatCompletionRequest {
-  model: string;
-  messages: ChatCompletionMessage[];
-  temperature?: number;
-  max_tokens?: number;
-  response_format?: { type: 'json_object' | 'text' };
-}
-
-export interface ChatCompletionResponse {
-  id: string;
-  choices: Array<{
-    message: {
-      role: string;
-      content: string;
-    };
-    finish_reason: string;
-  }>;
-  usage?: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
-}
-
-export interface AIClient {
-  chat: {
-    completions: {
-      create: (params: ChatCompletionRequest) => Promise<ChatCompletionResponse>;
-    };
-  };
-}
 
 export interface ParsedIntent {
   intent: 'fill_field' | 'confirm' | 'reject' | 'edit' | 'greeting' | 'question' | 'unknown';
@@ -79,204 +35,51 @@ export interface ParsedIntent {
 }
 
 // ============================================================================
-// CLIENT FACTORY - OpenAI SDK Pattern (calls backend proxy)
+// DISABLED FUNCTIONS - Always return fallback
 // ============================================================================
 
 /**
- * Get AI Client - Factory function คล้าย OpenAI SDK
- * แต่เรียกผ่าน backend proxy แทน (ไม่ expose API key)
- * 
- * Usage:
- * const client = getAIClient();
- * const response = await client.chat.completions.create({
- *   model: MODELS.NEMOTRON,
- *   messages: [{ role: 'user', content: 'Hello' }]
- * });
+ * AI is disabled in static site mode (GitHub Pages)
+ * Always returns false
  */
-export function getAIClient(): AIClient {
-  return {
-    chat: {
-      completions: {
-        create: async (params: ChatCompletionRequest): Promise<ChatCompletionResponse> => {
-          const response = await fetch(`${API_BASE_URL}/chat/completions`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(params),
-          });
-
-          if (!response.ok) {
-            const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-            throw new Error(error.error || `API error: ${response.status}`);
-          }
-
-          return await response.json();
-        },
-      },
-    },
-  };
+export function isAIConfigured(): boolean {
+  return false;
 }
 
 /**
- * Check if AI is configured (server-side)
- */
-export async function isAIConfigured(): Promise<boolean> {
-  try {
-    const response = await fetch(`${API_BASE_URL}/health`);
-    const data = await response.json();
-    return data.aiConfigured === true;
-  } catch {
-    return false;
-  }
-}
-
-// ============================================================================
-// SYSTEM PROMPTS
-// ============================================================================
-
-const INTAKE_PARSER_SYSTEM = `คุณคือผู้ช่วย AI สำหรับระบบจองบริการรถรับ-ส่งผู้ป่วย WelCares
-
-หน้าที่ของคุณ:
-1. วิเคราะห์ข้อความจากผู้ใช้
-2. สกัดข้อมูลที่จำเป็น (extract information)
-3. ตอบกลับเป็นภาษาไทยแบบเป็นกันเอง
-
-ข้อมูลที่ต้องสกัด:
-- contactName: ชื่อผู้ติดต่อ
-- contactPhone: เบอร์โทรศัพท์
-- serviceType: ประเภทบริการ (hospital-visit, follow-up, physical-therapy, dialysis, checkup, vaccination, other)
-- appointmentDate: วันนัด (YYYY-MM-DD)
-- appointmentTime: เวลานัด (HH:MM)
-- pickupAddress: ที่อยู่รับ
-- dropoffAddress: ที่อยู่ส่ง
-- patientName: ชื่อผู้ป่วย
-- mobilityLevel: การเคลื่อนไหว (independent, assisted, wheelchair, bedridden)
-
-รูปแบบการตอบ (JSON เท่านั้น):
-{
-  "intent": "fill_field|confirm|reject|edit|greeting|question|unknown",
-  "field": "ชื่อฟิลด์ที่กรอก (ถ้ามี)",
-  "value": "ค่าที่สกัดได้",
-  "confidence": 0.0-1.0,
-  "response": "ข้อความตอบกลับผู้ใช้"
-}`;
-
-const CHAT_RESPONSE_SYSTEM = `คุณคือ "น้องแคร์" ผู้ช่วยจองบริการรถรับ-ส่งผู้ป่วย WelCares
-
-บุคลิก:
-- เป็นกันเอง อ่อนโยน ใส่ใจ
-- ใช้ภาษาไทยสุภาพ ไม่ใช้คำยาก
-- ตอบสั้น กระชับ ได้ใจความ
-- ใช้ emoji ได้เล็กน้อย 💜
-
-กฎการตอบ:
-1. ตอบตรงประเด็น ไม่เวิ่นเว้อ
-2. ถ้าข้อมูลไม่ครบ ถามต่อเนื่อง
-3. ถ้าข้อมูลครบ สรุปให้ยืนยัน
-4. ไม่แนะนำโรงพยาบาลหรือการรักษา
-5. ไม่ขอข้อมูลส่วนตัวที่ไม่จำเป็น`;
-
-// ============================================================================
-// HIGH-LEVEL FUNCTIONS
-// ============================================================================
-
-/**
- * Parse user message using AI
- * OpenAI SDK pattern: client.chat.completions.create()
+ * Parse user message using AI - DISABLED
+ * Always returns unknown intent (fallback to rule-based)
  */
 export async function parseMessageWithAI(
-  userMessage: string,
-  currentFormData: PartialIntakeInput,
+  _userMessage: string,
+  _currentFormData: PartialIntakeInput,
   _context: string[] = []
 ): Promise<ParsedIntent> {
-  const client = getAIClient();
-
-  try {
-    const response = await client.chat.completions.create({
-      model: DEFAULT_MODEL,
-      messages: [
-        { role: 'system', content: INTAKE_PARSER_SYSTEM },
-        {
-          role: 'user',
-          content: `ข้อมูลปัจจุบัน: ${JSON.stringify(currentFormData)}\n\nข้อความผู้ใช้: "${userMessage}"\n\nตอบกลับในรูปแบบ JSON:`,
-        },
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.3,
-      max_tokens: 500,
-    });
-
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
-      return { intent: 'unknown', confidence: 0 };
-    }
-
-    const parsed = JSON.parse(content);
-
-    return {
-      intent: parsed.intent || 'unknown',
-      field: parsed.field,
-      value: parsed.value,
-      confidence: parsed.confidence || 0.5,
-      response: parsed.response,
-      missingInfo: parsed.missingInfo,
-    };
-  } catch (error) {
-    console.error('[parseMessageWithAI] Error:', error);
-    return { intent: 'unknown', confidence: 0 };
-  }
+  // AI disabled - use rule-based parser instead
+  return { intent: 'unknown', confidence: 0 };
 }
 
 /**
- * Generate AI chat response
- * OpenAI SDK pattern: client.chat.completions.create()
+ * Generate AI chat response - DISABLED
+ * Always returns empty (fallback to rule-based)
  */
 export async function generateAIResponse(
-  userMessage: string,
-  currentFormData: PartialIntakeInput,
-  missingFields: string[],
+  _userMessage: string,
+  _currentFormData: PartialIntakeInput,
+  _missingFields: string[],
   _context: string[] = []
 ): Promise<{ content: string; quickReplies?: Array<{ label: string; value: string }> }> {
-  const client = getAIClient();
-
-  try {
-    const systemPrompt = `${CHAT_RESPONSE_SYSTEM}
-
-ข้อมูลปัจจุบันที่มี:
-${JSON.stringify(currentFormData, null, 2)}
-
-ฟิลด์ที่ยังขาด: ${missingFields.join(', ')}
-
-คุณคือน้องแคร์ กำลังคุยกับลูกค้า`;
-
-    const response = await client.chat.completions.create({
-      model: DEFAULT_MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage },
-      ],
-      temperature: 0.5,
-      max_tokens: 500,
-    });
-
-    const content = response.choices[0]?.message?.content?.trim() || '';
-
-    return { content };
-  } catch (error) {
-    console.error('[generateAIResponse] Error:', error);
-    return { content: '' };
-  }
+  // AI disabled - use rule-based generator instead
+  return { content: '' };
 }
 
 // ============================================================================
 // EXPORTS
 // ============================================================================
 
-export { DEFAULT_MODEL, API_BASE_URL };
+export { MODELS };
 
 export default {
-  getAIClient,
   parseMessageWithAI,
   generateAIResponse,
   isAIConfigured,
