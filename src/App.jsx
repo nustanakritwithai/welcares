@@ -2,6 +2,7 @@ import{useState,createContext,useContext}from"react";
 import{IntakeAgentDemo}from'./agents/intake/demo/IntakeAgentDemo';
 import{IntakeChatDemo}from'./agents/intake-chat/demo/IntakeChatDemo';
 import{ChatBookingAgentDemo}from'./agents/__demo__/ChatBookingAgentDemo';
+import{AgentChat}from'./components/AgentChat';
 const C={pri:'#7F77DD',suc:'#1D9E75',wrn:'#F59E0B',dan:'#E24B4A',drk:'#1E293B',nvy:'#1E3A8A',mid:'#64748B',bdr:'#E2E8F0',bg:'#F8FAFC',txt:'#1E293B',lin:'#06C755',tel:'#14B8A6',pur:'#8B5CF6',org:'#F97316'};
 const Ctx=createContext(null);const useCtx=()=>useContext(Ctx);
 const GMAPS_KEY=import.meta.env.VITE_GOOGLE_MAPS_API_KEY||'';
@@ -1242,7 +1243,7 @@ export default function App(){
           {tab==='ops_web'&&<div style={{width:'100%',maxWidth:960}}><OpsWebDash/></div>}
           {tab==='mgmt_web'&&<div style={{width:'100%',maxWidth:960}}><MgmtWebDash/></div>}
           {tab==='line'&&<LineView/>}
-          {tab==='intake-chat'&&<div style={{width:'100%',maxWidth:480,margin:'0 auto'}}><IntakeChatDemo /></div>}
+          {tab==='intake-chat'&&<div style={{width:'100%',maxWidth:400,margin:'0 auto',height:700}}><AgentChat/></div>}
           {tab==='intake'&&<div style={{width:'100%',maxWidth:800,margin:'0 auto'}}><div style={{background:'#fff',borderRadius:16,boxShadow:'0 4px 24px rgba(0,0,0,0.08)',overflow:'hidden'}}><div style={{background:C.pri,padding:'16px 24px',display:'flex',alignItems:'center',gap:'12px'}}><div style={{width:'40px',height:'40px',background:'white',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'20px'}}>💚</div><div><div style={{color:'white',fontWeight:700,fontSize:'18px'}}>Intake Agent MVP</div><div style={{color:'rgba(255,255,255,0.8)',fontSize:'12px'}}>ระบบรับข้อมูลจองบริการอัตโนมัติ</div></div></div><div style={{padding:'24px'}}><IntakeAgentDemo/></div></div></div>}
           {tab==='booking-agent'&&<ChatBookingAgentDemo/>}
         </div>
