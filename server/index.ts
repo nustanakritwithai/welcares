@@ -14,6 +14,7 @@ import jobRoutes from './routes/jobs.js';
 import intakeRoutes from './routes/intake.js';
 import dispatchRoutes from './routes/dispatch.js';
 import familyUpdateRoutes from './routes/family-update.js';
+import agentRoutes from './routes/agent.js';
 
 // Load env vars
 dotenv.config();
@@ -56,6 +57,9 @@ app.use('/api/dispatch', dispatchRoutes);
 
 // Family Update Agent — สร้าง notification message สำหรับครอบครัว
 app.use('/api/family-update', familyUpdateRoutes);
+
+// Agent Chat — ReAct loop สำหรับ booking conversation
+app.use('/api/agent', agentRoutes);
 
 /**
  * Health check
