@@ -12,6 +12,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import jobRoutes from './routes/jobs.js';
 import intakeRoutes from './routes/intake.js';
+import dispatchRoutes from './routes/dispatch.js';
+import familyUpdateRoutes from './routes/family-update.js';
 
 // Load env vars
 dotenv.config();
@@ -49,6 +51,12 @@ app.use('/api/jobs', jobRoutes);
 // Intake bridge — รับ submit จาก submitIntake() แล้วเก็บลง JobStore
 app.use('/api/intake', intakeRoutes);
 
+// Dispatch Agent — เลือก provider แล้ว transition state → ASSIGNED
+app.use('/api/dispatch', dispatchRoutes);
+
+// Family Update Agent — สร้าง notification message สำหรับครอบครัว
+app.use('/api/family-update', familyUpdateRoutes);
+
 /**
  * Health check
  */
@@ -63,6 +71,8 @@ app.get('/api/health', (_req, res) => {
       'GET    /api/jobs/:id',
       'PATCH  /api/jobs/:id/state',
       'DELETE /api/jobs/:id',
+      'POST   /api/dispatch/:jobId',
+      'POST   /api/family-update/:jobId',
     ],
   });
 });
@@ -170,6 +180,14 @@ app.listen(PORT, () => {
 🔗 Intake Bridge:
   POST   /api/intake/submit       - Submit intake form → JobStore (ใช้โดย submitIntake())
   GET    /api/intake/jobs         - List jobs from intake source
+
+🚀 Dispatch Agent:
+  POST   /api/dispatch/:jobId     - เลือก provider + transition → ASSIGNED
+  GET    /api/dispatch/pending    - ดู jobs ที่รอ dispatch
+
+📣 Family Update Agent:
+  POST   /api/family-update/:jobId              - สร้าง message จาก current state
+  POST   /api/family-update/:jobId/state/:state - สร้าง message สำหรับ state ที่ระบุ
 
 🤖 AI Status: ${API_KEY ? '✅ Configured' : '❌ Not configured'}
   `);
