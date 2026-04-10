@@ -870,7 +870,8 @@ function CTOpContact(){
 function CTJobBoard(){
   const[wage,sw]=useState(1500);const[avail,sa]=useState([2,3,4]);
   const days=['จ','อ','พ','พฤ','ศ','ส','อา'];
-  const jobs=[{type:'🤝 เพื่อนหาหมอ',hosp:'รพ.ศิริราช',date:'20 พ.ค.',pay:'฿1,680',tier:'PN',ok:true},{type:'🤝 เพื่อนหาหมอ',hosp:'รพ.จุฬา',date:'21 พ.ค.',pay:'฿1,200',tier:'CG',ok:false},{type:'🚗 รถรับส่ง',hosp:'รพ.กลาง',date:'23 พ.ค.',pay:'฿500',tier:'Driver',ok:true}];
+  const[lsJobs]=useState(()=>{try{const sv=JSON.parse(localStorage.getItem('welcares_bookings')||'[]');const svc={'hospital-visit':'🤝 เพื่อนหาหมอ','dialysis':'🩸 ล้างไต','chemotherapy':'💉 เคมีบำบัด','radiation':'☢️ รังสีรักษา','physical-therapy':'🏃 กายภาพบำบัด','checkup':'🔍 ตรวจสุขภาพ','vaccination':'💉 วัคซีน','other':'🏥 บริการทั่วไป'};const tr={'independent':'CG','assisted':'CG','wheelchair':'PN','bedridden':'RN'};return sv.filter(b=>b.status!=='cancelled').map(b=>{const bd=b.bookingData||{};return{type:svc[bd.service?.type]||'🏥 งานใหม่',hosp:bd.locations?.dropoff||'-',date:[bd.schedule?.date,bd.schedule?.time].filter(Boolean).join(' ')||'-',pay:'฿1,500',tier:tr[bd.patient?.mobilityLevel]||'CG',ok:true,jobId:b.jobId,patient:bd.patient?.name,isNew:true};});}catch{return[];}});
+  const jobs=[...lsJobs,{type:'🤝 เพื่อนหาหมอ',hosp:'รพ.ศิริราช',date:'20 พ.ค.',pay:'฿1,680',tier:'PN',ok:true},{type:'🤝 เพื่อนหาหมอ',hosp:'รพ.จุฬา',date:'21 พ.ค.',pay:'฿1,200',tier:'CG',ok:false},{type:'🚗 รถรับส่ง',hosp:'รพ.กลาง',date:'23 พ.ค.',pay:'฿500',tier:'Driver',ok:true}];
   return <div style={{background:C.bg}}>
     <AB t="📋 รับงาน + ตารางเวลา" bg={C.drk}/>
     <div style={{padding:'8px 9px'}}>
@@ -884,9 +885,12 @@ function CTJobBoard(){
       <ST ic="📆" ch="เพิ่มวันรับงาน"/>
       <div style={{display:'flex',gap:2,marginBottom:6}}>{days.map((d,i)=><div key={i} onClick={()=>sa(s=>s.includes(i)?s.filter(x=>x!==i):[...s,i])} style={{flex:1,borderRadius:6,padding:'4px 2px',textAlign:'center',fontSize:8,border:`1px solid ${avail.includes(i)?C.suc:C.bdr}`,background:avail.includes(i)?'#ECFDF5':'#F8FAFC',color:avail.includes(i)?C.suc:C.mid,cursor:'pointer',fontWeight:avail.includes(i)?700:400}}>{d}{avail.includes(i)&&<div style={{fontSize:6}}>{"✓"}</div>}</div>)}</div>
       <HR/>
-      <ST ic="📋" ch="งานที่เปิดรับ"/>
-      {jobs.map((j,i)=><Crd key={i} s={{opacity:j.ok?1:.5}}>
-        <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{fontSize:10,fontWeight:700}}>{j.type+" · "+j.hosp}</span><Tag ch={j.pay} col={j.ok?C.suc:C.mid}/></div>
+      <ST ic="📋" ch={"งานที่เปิดรับ ("+jobs.length+")"}/>
+      {jobs.map((j,i)=><Crd key={i} s={{opacity:j.ok?1:.5,borderLeft:j.isNew?'3px solid '+C.org:undefined}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:2}}>
+          <div><div style={{fontSize:10,fontWeight:700,display:'flex',alignItems:'center',gap:4}}>{j.isNew&&<Tag ch="🆕 ใหม่" col={C.org}/>}{j.type}</div><div style={{fontSize:9,color:C.mid}}>{j.hosp}{j.patient&&(' · 👤 '+j.patient)}</div>{j.jobId&&<div style={{fontSize:8,color:'#94A3B8'}}>{j.jobId}</div>}</div>
+          <Tag ch={j.pay} col={j.ok?C.suc:C.mid}/>
+        </div>
         <div style={{fontSize:9,color:C.mid,marginBottom:3}}>{j.date+" · "}<Tag ch={j.tier} col={C.pri}/></div>
         {j.ok?<Btn ch="รับงานนี้ →" col={C.suc} sm/>:<div style={{fontSize:9,color:C.dan}}>{"🔒 Tier ไม่ถึง"}</div>}
       </Crd>)}
@@ -1066,6 +1070,7 @@ const ctHam=[{ic:'📋',label:'ประวัติธุรกรรม',hamPa
 // ── OPS DASHBOARD (V15V7 style with tabs - instruction 17) ────────
 function OpsWebDash(){
   const[tab,st]=useState('daily');const[oF,sO]=useState(5);const[wF,sW]=useState(25);const[ai,sa]=useState(false);
+  const[lsBooks]=useState(()=>{try{return JSON.parse(localStorage.getItem('welcares_bookings')||'[]').filter(b=>b.status!=='cancelled');}catch{return[];}});
   return <div style={{background:'#fff',borderRadius:12,border:'1px solid '+C.bdr,overflow:'hidden'}}>
     <div style={{background:C.drk,padding:'9px 13px',display:'flex',justifyContent:'space-between',flexWrap:'wrap',gap:5}}>
       <div style={{display:'flex',alignItems:'center',gap:8}}><span style={{color:'#fff',fontWeight:800}}>{"🏥 Welcares Ops Dashboard"}</span><Tag ch="LIVE" col='#60A5FA'/></div>
@@ -1089,7 +1094,10 @@ function OpsWebDash(){
       </div>}
       {tab==='lb'&&<div><ST ic="🏆" ch="Leaderboard เดือนนี้"/><table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}><thead><tr style={{background:'#EFF6FF'}}>{['#','ชื่อ','Tier','งาน','⭐','❤️','Score'].map((h,i)=><th key={i} style={{padding:'6px 8px',textAlign:'left',fontWeight:700,borderBottom:'2px solid '+C.bdr}}>{h}</th>)}</tr></thead><tbody>{[{r:'🥇',n:'คุณดูแล B',t:'Admin',j:45,rt:4.9,h:38,s:982},{r:'🥈',n:'คุณรู้ใจ A',t:'RN',j:38,rt:4.8,h:32,s:945},{r:'🥉',n:'คุณขับดี C',t:'Driver',j:52,rt:4.7,h:29,s:921}].map((r,i)=><tr key={i} style={{borderBottom:'1px solid '+C.bdr}}><td style={{padding:'6px 8px'}}>{r.r}</td><td style={{padding:'6px 8px',fontWeight:700}}>{r.n}</td><td style={{padding:'6px 8px'}}><Tag ch={r.t} col={C.pri}/></td><td style={{padding:'6px 8px'}}>{r.j}</td><td style={{padding:'6px 8px',color:C.wrn}}>{"⭐"+r.rt}</td><td style={{padding:'6px 8px',color:C.dan}}>{"❤️"+r.h}</td><td style={{padding:'6px 8px',fontWeight:800,color:C.pri}}>{r.s}</td></tr>)}</tbody></table></div>}
       {tab==='backlog'&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-        <div><ST ic="📋" ch="Unmatched"/>{[{d:'19 มี.ค.',s:'RN+Driver',z:'ลาดพร้าว',v:'฿850'},{d:'20 มี.ค.',s:'CG+Driver',z:'สุขุมวิท',v:'฿650'}].map((b,i)=><Crd key={i}><div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{fontWeight:700,fontSize:10}}>{b.d+" · "+b.s}</span><Tag ch={b.v} col={C.dan}/></div><div style={{fontSize:9,color:C.mid,marginBottom:3}}>{b.z}</div><Btn ch="จับคู่" col={C.pri} sm/></Crd>)}</div>
+        <div><ST ic="📋" ch={"Unmatched ("+(lsBooks.length+2)+")"}/>
+          {lsBooks.map((b,i)=>{const bd=b.bookingData||{};const tr={'independent':'CG','assisted':'CG','wheelchair':'PN','bedridden':'RN'};return<Crd key={'ls'+i} s={{borderLeft:'3px solid '+C.org}}><div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{fontWeight:700,fontSize:10,color:C.org}}>🆕 {b.jobId}</span><Tag ch="฿1,500" col={C.dan}/></div><div style={{fontSize:9,color:C.mid,marginBottom:2}}>{bd.patient?.name||'-'}{" · "}{tr[bd.patient?.mobilityLevel]||'CG'}</div><div style={{fontSize:9,color:C.mid,marginBottom:3}}>{[bd.schedule?.date,bd.schedule?.time].filter(Boolean).join(' ')||'-'}</div><Btn ch="จับคู่" col={C.pri} sm/></Crd>;})}
+          {[{d:'19 มี.ค.',s:'RN+Driver',z:'ลาดพร้าว',v:'฿850'},{d:'20 มี.ค.',s:'CG+Driver',z:'สุขุมวิท',v:'฿650'}].map((b,i)=><Crd key={i}><div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{fontWeight:700,fontSize:10}}>{b.d+" · "+b.s}</span><Tag ch={b.v} col={C.dan}/></div><div style={{fontSize:9,color:C.mid,marginBottom:3}}>{b.z}</div><Btn ch="จับคู่" col={C.pri} sm/></Crd>)}
+        </div>
         <div><ST ic="⏱️" ch="Pending"/>{[{p:'🔴',t:'โทรร้องเรียน',tm:'15 นาที',a:'โทร',c:C.dan},{p:'🟡',t:'ตรวจ KYC 3 ใบ',tm:'วันนี้',a:'ตรวจ',c:C.wrn},{p:'🟢',t:'Tier Upgrade',tm:'สัปดาห์นี้',a:'อนุมัติ',c:C.suc}].map((a,i)=><div key={i} style={{display:'flex',gap:7,padding:'5px 0',borderBottom:'1px solid '+C.bdr,alignItems:'center'}}><span>{a.p}</span><div style={{flex:1}}><div style={{fontSize:10,fontWeight:700}}>{a.t}</div><div style={{fontSize:9,color:C.mid}}>{"⏰ "+a.tm}</div></div><Btn ch={a.a} col={a.c} sm/></div>)}</div>
       </div>}
       {tab==='settings'&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
