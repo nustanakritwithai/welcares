@@ -578,6 +578,8 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     outline: 'none',
     background: '#F8FAFC',
+    color: '#1E293B',
+    color: '#1E293B',
   },
   sendBtn: {
     background: LINE_GREEN,
