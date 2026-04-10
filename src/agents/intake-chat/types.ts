@@ -80,8 +80,16 @@ export interface IntakeChatAgentState {
   isTyping: boolean;
   isReady: boolean;
   
-  // Form Data
-  formData: Partial<IntakeInput>;
+  // Form Data - SOURCE OF TRUTH
+  formData: PartialIntakeInput;
+  
+  // Current field being asked
+  currentField: string | null;
+  
+  // Missing fields
+  missingFields: string[];
+  
+  // Validation
   validationResult?: ValidationResult;
   
   // Job
@@ -96,9 +104,6 @@ export interface IntakeChatAgentActions {
   // Message actions
   sendMessage: (text: string) => Promise<void>;
   selectQuickReply: (reply: QuickReply) => Promise<void>;
-  
-  // Form actions
-  updateField: <K extends keyof IntakeInput>(field: K, value: IntakeInput[K]) => void;
   
   // Control actions
   confirmBooking: () => Promise<void>;

@@ -1,34 +1,21 @@
 /**
- * Intake Chat Agent - React Hook
- * Hook สำหรับ conversational intake chatbot
+ * Intake Chat Agent - React Hook (Refactored v2.0)
+ * Source of truth: formData state
  * 
- * @version 1.0
+ * @version 2.0
  * @module src/agents/intake-chat/useIntakeChatAgent
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type {
   ChatMessage,
-  QuickReplyOption,
-  IntakeFormData,
-  JobSpec,
+  QuickReply,
+  ConversationStatus,
 } from './types';
-import type { PartialIntakeInput, IntakeInput } from '../intake/types';
+import type { PartialIntakeInput, IntakeInput, JobSpec } from '../intake/types';
 import { validateFormData, type ValidateFormDataResult } from '../intake/validator';
 import { previewIntake, submitIntake } from '../intake/service';
-import { parseInput, detectIntent, applyParsedAnswer } from './parser';
 import { parseMessageWithAI, generateAIResponse, isAIConfigured } from './openrouter';
-import {
-  generateWelcomeMessages,
-  generateNextQuestion,
-  generateAcknowledgment,
-  generateConfirmationMessage,
-  generateSubmissionSuccess,
-  generateSubmissionError,
-  generateValidationError,
-  createUserMessage,
-  determineConversationState,
-} from './conversation';
 
 // ============================================================================
 // TYPES
@@ -44,11 +31,15 @@ export interface UseIntakeChatAgentReturn {
   /** ส่งข้อความ */
   sendMessage: (text?: string) => Promise<void>;
   /** เลือก quick reply */
-  selectQuickReply: (option: QuickReplyOption) => void;
+  selectQuickReply: (reply: QuickReply) => void;
   /** รีเซ็ต conversation */
   resetConversation: () => void;
-  /** ข้อมูล form ที่กรอก */
-  formData: IntakeFormData;
+  /** ข้อมูล form ที่กรอก (SOURCE OF TRUTH) */
+  formData: PartialIntakeInput;
+  /** Field ที่กำลังถามอยู่ */
+  currentField: string | null;
+  /** Fields ที่ยังขาด */
+  missingFields: string[];
   /** Preview JobSpec */
   preview: JobSpec | null;
   /** ข้อมูลครบหรือไม่ */
@@ -61,6 +52,8 @@ export interface UseIntakeChatAgentReturn {
   error: string | null;
   /** สำเร็จแล้ว */
   success: boolean;
+  /** Job ID */
+  jobId: string | null;
 }
 
 export interface UseIntakeChatAgentOptions {
@@ -75,87 +68,431 @@ export interface UseIntakeChatAgentOptions {
 }
 
 // ============================================================================
-// HOOK
+// FIELD DEFINITIONS (Order matters)
+// ============================================================================
+
+const FIELD_ORDER = [
+  'contact.contactName',
+  'contact.contactPhone',
+  'service.serviceType',
+  'schedule.appointmentDate',
+  'schedule.appointmentTime',
+  'locations.pickup.address',
+  'locations.dropoff.address',
+  'patient.name',
+  'patient.mobilityLevel',
+  'patient.equipmentNeeds',
+] as const;
+
+const FIELD_QUESTIONS: Record<string, { text: string; type: 'text' | 'select' | 'date' | 'time'; options?: QuickReply[] }> = {
+  'contact.contactName': {
+    text: '👋 สวัสดีค่ะ! กรุณาบอกชื่อผู้ติดต่อด้วยค่ะ',
+    type: 'text',
+  },
+  'contact.contactPhone': {
+    text: '📞 ขอเบอร์โทรศัพท์ติดต่อด้วยค่ะ',
+    type: 'text',
+  },
+  'service.serviceType': {
+    text: '🏥 เลือกประเภทบริการที่ต้องการค่ะ',
+    type: 'select',
+    options: [
+      { id: 'hospital-visit', label: '🏥 พบแพทย์', value: 'hospital-visit' },
+      { id: 'follow-up', label: '💊 ติดตามอาการ', value: 'follow-up' },
+      { id: 'physical-therapy', label: '🏃 กายภาพ', value: 'physical-therapy' },
+      { id: 'dialysis', label: '💧 ล้างไต', value: 'dialysis' },
+      { id: 'checkup', label: '📋 ตรวจสุขภาพ', value: 'checkup' },
+      { id: 'vaccination', label: '💉 วัคซีน', value: 'vaccination' },
+    ],
+  },
+  'schedule.appointmentDate': {
+    text: '📅 วันนัดหมายวันไหนคะ? (เช่น 15/01/2026)',
+    type: 'date',
+  },
+  'schedule.appointmentTime': {
+    text: '🕐 เวลากี่โมงคะ? (เช่น 14:30)',
+    type: 'time',
+  },
+  'locations.pickup.address': {
+    text: '📍 รับจากที่ไหนคะ?',
+    type: 'text',
+  },
+  'locations.dropoff.address': {
+    text: '🏥 ส่งที่ไหนคะ?',
+    type: 'text',
+  },
+  'patient.name': {
+    text: '🧑‍⚕️ ชื่อผู้ป่วยค่ะ',
+    type: 'text',
+  },
+  'patient.mobilityLevel': {
+    text: '♿ ผู้ป่วยเคลื่อนไหวอย่างไรคะ?',
+    type: 'select',
+    options: [
+      { id: 'independent', label: '🚶 เดินได้เอง', value: 'independent' },
+      { id: 'assisted', label: '🤝 ต้องช่วยพยุง', value: 'assisted' },
+      { id: 'wheelchair', label: '♿ ใช้รถเข็น', value: 'wheelchair' },
+      { id: 'bedridden', label: '🛏️ ติดเตียง', value: 'bedridden' },
+    ],
+  },
+  'patient.equipmentNeeds': {
+    text: '🦽 ต้องการอุปกรณ์พิเศษไหมคะ?',
+    type: 'select',
+    options: [
+      { id: 'none', label: '❌ ไม่ต้องการ', value: 'none' },
+      { id: 'oxygen', label: '💨 ถังออกซิเจน', value: 'oxygen' },
+      { id: 'stretcher', label: '🛏️ เปลนอน', value: 'stretcher' },
+      { id: 'iv-stand', label: '💧 ขาตั้งน้ำเกลือ', value: 'iv-stand' },
+    ],
+  },
+};
+
+// ============================================================================
+// HELPERS
 // ============================================================================
 
 /**
- * React Hook สำหรับ Intake Chat Agent
- * 
- * @example
- * ```tsx
- * const {
- *   messages,
- *   inputText,
- *   setInputText,
- *   sendMessage,
- *   selectQuickReply,
- *   formData,
- *   isComplete,
- *   awaitingConfirmation,
- *   loading,
- *   success,
- * } = useIntakeChatAgent();
- * ```
+ * Set nested value by path (e.g., "contact.contactName")
  */
+function setNestedValue<T extends Record<string, unknown>>(
+  obj: T,
+  path: string,
+  value: unknown
+): T {
+  const parts = path.split('.');
+  const result = { ...obj };
+  
+  let current: Record<string, unknown> = result;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const key = parts[i];
+    if (!(key in current) || typeof current[key] !== 'object' || current[key] === null) {
+      current[key] = {};
+    }
+    current[key] = { ...(current[key] as Record<string, unknown>) };
+    current = current[key] as Record<string, unknown>;
+  }
+  
+  current[parts[parts.length - 1]] = value;
+  return result;
+}
+
+/**
+ * Get nested value by path
+ */
+function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
+  const parts = path.split('.');
+  let current: unknown = obj;
+  
+  for (const part of parts) {
+    if (current === null || current === undefined || typeof current !== 'object') {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[part];
+  }
+  
+  return current;
+}
+
+/**
+ * Check if field has value
+ */
+function hasFieldValue(formData: PartialIntakeInput, field: string): boolean {
+  const value = getNestedValue(formData as Record<string, unknown>, field);
+  return value !== undefined && value !== null && value !== '';
+}
+
+/**
+ * Parse user input based on field type
+ */
+function parseInputForField(text: string, field: string): { value: unknown; confidence: number } | null {
+  const trimmed = text.trim();
+  
+  switch (field) {
+    case 'contact.contactName':
+    case 'patient.name':
+      return trimmed.length >= 2 
+        ? { value: trimmed, confidence: 0.9 }
+        : null;
+      
+    case 'contact.contactPhone':
+      // Phone number validation (Thai format)
+      const phone = trimmed.replace(/[-\s]/g, '');
+      if (/^0\d{8,9}$/.test(phone)) {
+        return { value: phone, confidence: 0.95 };
+      }
+      return null;
+      
+    case 'service.serviceType':
+      const serviceMap: Record<string, string> = {
+        'พบแพทย์': 'hospital-visit',
+        'หมอ': 'hospital-visit',
+        'ติดตาม': 'follow-up',
+        'กายภาพ': 'physical-therapy',
+        'ล้างไต': 'dialysis',
+        'ตรวจสุขภาพ': 'checkup',
+        'วัคซีน': 'vaccination',
+      };
+      const serviceKey = Object.keys(serviceMap).find(k => trimmed.includes(k));
+      if (serviceKey) {
+        return { value: serviceMap[serviceKey], confidence: 0.9 };
+      }
+      return null;
+      
+    case 'schedule.appointmentDate':
+      // Parse date (Thai format: DD/MM/YYYY or D/M/YY)
+      const dateMatch = trimmed.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+      if (dateMatch) {
+        const [, day, month, year] = dateMatch;
+        const fullYear = year.length === 2 ? `20${year}` : year;
+        const dateStr = `${fullYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+        return { value: dateStr, confidence: 0.9 };
+      }
+      return null;
+      
+    case 'schedule.appointmentTime':
+      // Parse time (HH:MM)
+      const timeMatch = trimmed.match(/(\d{1,2}):(\d{2})/);
+      if (timeMatch) {
+        const [, hour, minute] = timeMatch;
+        const timeStr = `${hour.padStart(2, '0')}:${minute}`;
+        return { value: timeStr, confidence: 0.9 };
+      }
+      return null;
+      
+    case 'locations.pickup.address':
+    case 'locations.dropoff.address':
+      return trimmed.length >= 5
+        ? { value: trimmed, confidence: 0.85 }
+        : null;
+      
+    case 'patient.mobilityLevel':
+      const mobilityMap: Record<string, string> = {
+        'เดิน': 'independent',
+        'เอง': 'independent',
+        'ช่วย': 'assisted',
+        'พยุง': 'assisted',
+        'รถเข็น': 'wheelchair',
+        'เข็น': 'wheelchair',
+        'ติดเตียง': 'bedridden',
+        'เตียง': 'bedridden',
+      };
+      const mobilityKey = Object.keys(mobilityMap).find(k => trimmed.includes(k));
+      if (mobilityKey) {
+        return { value: mobilityMap[mobilityKey], confidence: 0.9 };
+      }
+      return null;
+      
+    case 'patient.equipmentNeeds':
+      if (trimmed.includes('ไม่') || trimmed === 'none') {
+        return { value: 'none', confidence: 0.9 };
+      }
+      const equipMap: Record<string, string> = {
+        'ออกซิเจน': 'oxygen',
+        'ถัง': 'oxygen',
+        'เปล': 'stretcher',
+        'นอน': 'stretcher',
+        'น้ำเกลือ': 'iv-stand',
+        'เกลือ': 'iv-stand',
+      };
+      const equipKey = Object.keys(equipMap).find(k => trimmed.includes(k));
+      if (equipKey) {
+        return { value: equipMap[equipKey], confidence: 0.9 };
+      }
+      return null;
+      
+    default:
+      return { value: trimmed, confidence: 0.5 };
+  }
+}
+
+/**
+ * Generate question message for field
+ */
+function generateQuestionMessage(field: string): ChatMessage {
+  const config = FIELD_QUESTIONS[field];
+  if (!config) {
+    return {
+      id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      role: 'assistant',
+      type: 'text',
+      content: `กรุณากรอก ${field}`,
+      timestamp: new Date(),
+      metadata: { field },
+    };
+  }
+  
+  return {
+    id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    role: 'assistant',
+    type: config.type === 'select' ? 'quick_replies' : 'text',
+    content: config.text,
+    quickReplies: config.options,
+    timestamp: new Date(),
+    metadata: { field, type: config.type },
+  };
+}
+
+/**
+ * Generate welcome message
+ */
+function generateWelcomeMessage(): ChatMessage {
+  return {
+    id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    role: 'assistant',
+    type: 'text',
+    content: '👋 สวัสดีค่ะ! ฉันคือน้องแคร์ ผู้ช่วยจองบริการรถรับ-ส่งผู้ป่วย 🚑\n\nให้ฉันช่วยจองให้นะคะ',
+    timestamp: new Date(),
+  };
+}
+
+/**
+ * Generate acknowledgment
+ */
+function generateAcknowledgment(field: string, value: unknown): string {
+  const fieldNames: Record<string, string> = {
+    'contact.contactName': 'ชื่อผู้ติดต่อ',
+    'contact.contactPhone': 'เบอร์โทร',
+    'service.serviceType': 'บริการ',
+    'schedule.appointmentDate': 'วันนัด',
+    'schedule.appointmentTime': 'เวลา',
+    'locations.pickup.address': 'จุดรับ',
+    'locations.dropoff.address': 'จุดส่ง',
+    'patient.name': 'ชื่อผู้ป่วย',
+    'patient.mobilityLevel': 'การเคลื่อนไหว',
+    'patient.equipmentNeeds': 'อุปกรณ์',
+  };
+  
+  const name = fieldNames[field] || field;
+  return `✅ บันทึก ${name}: ${value}`;
+}
+
+/**
+ * Generate summary/preview message
+ */
+function generateSummaryMessage(formData: PartialIntakeInput): ChatMessage {
+  const contact = (formData as Record<string, unknown>).contact as Record<string, string> | undefined;
+  const service = (formData as Record<string, unknown>).service as Record<string, string> | undefined;
+  const schedule = (formData as Record<string, unknown>).schedule as Record<string, string> | undefined;
+  const locations = (formData as Record<string, unknown>).locations as Record<string, Record<string, string>> | undefined;
+  const patient = (formData as Record<string, unknown>).patient as Record<string, string> | undefined;
+  
+  const summary = [
+    '📋 สรุปข้อมูลการจอง',
+    '',
+    `👤 ผู้ติดต่อ: ${contact?.contactName || '-'}` ,
+    `📞 โทร: ${contact?.contactPhone || '-'}`,
+    `🏥 บริการ: ${service?.serviceType || '-'}`,
+    `📅 วันที่: ${schedule?.appointmentDate || '-'} ${schedule?.appointmentTime || ''}`,
+    `📍 รับ: ${locations?.pickup?.address || '-'}`,
+    `🏥 ส่ง: ${locations?.dropoff?.address || '-'}`,
+    `🧑‍⚕️ ผู้ป่วย: ${patient?.name || '-'}`,
+    `♿ การเคลื่อนไหว: ${patient?.mobilityLevel || '-'}`,
+    '',
+    'ยืนยันข้อมูลถูกต้องไหมคะ?',
+  ].join('\n');
+  
+  return {
+    id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    role: 'assistant',
+    type: 'confirmation',
+    content: summary,
+    quickReplies: [
+      { id: 'confirm', label: '✅ ยืนยัน', value: 'confirm' },
+      { id: 'edit', label: '✏️ แก้ไข', value: 'edit' },
+    ],
+    timestamp: new Date(),
+  };
+}
+
+/**
+ * Generate success message
+ */
+function generateSuccessMessage(jobId: string): ChatMessage {
+  return {
+    id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    role: 'assistant',
+    type: 'success',
+    content: `🎉 จองสำเร็จ!\n\nหมายเลขการจอง: #${jobId}\n\nขอบคุณที่ใช้บริการค่ะ 💜`,
+    timestamp: new Date(),
+  };
+}
+
+/**
+ * Generate error message
+ */
+function generateErrorMessage(error: string): ChatMessage {
+  return {
+    id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    role: 'assistant',
+    type: 'error',
+    content: `❌ เกิดข้อผิดพลาด: ${error}`,
+    timestamp: new Date(),
+  };
+}
+
+// ============================================================================
+// HOOK
+// ============================================================================
+
 export function useIntakeChatAgent(
   options: UseIntakeChatAgentOptions = {}
 ): UseIntakeChatAgentReturn {
-  const { sessionId: initialSessionId, onSuccess, onError, onFormDataChange } = options;
+  const { onSuccess, onError, onFormDataChange } = options;
   
-  // Generate session ID if not provided
-  const sessionIdRef = useRef<string>(
-    initialSessionId || `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-  );
+  // ============================================================================
+  // STATE - Source of Truth
+  // ============================================================================
   
-  // State
+  /** Messages แยกออกจาก booking state */
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  
+  /** Input text */
   const [inputText, setInputText] = useState('');
+  
+  /** Form Data - SOURCE OF TRUTH */
   const [formData, setFormData] = useState<PartialIntakeInput>({});
+  
+  /** Current field being asked */
+  const [currentField, setCurrentField] = useState<string | null>(null);
+  
+  /** Missing fields */
+  const [missingFields, setMissingFields] = useState<string[]>(FIELD_ORDER.slice());
+  
+  /** Preview JobSpec */
   const [preview, setPreview] = useState<JobSpec | null>(null);
+  
+  /** Status flags */
   const [isComplete, setIsComplete] = useState(false);
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [jobId, setJobId] = useState<string | null>(null);
   
-  // Refs for tracking state
+  /** Processing lock */
   const isProcessingRef = useRef(false);
-  const lastValidationRef = useRef<ValidateFormDataResult | null>(null);
   
   // ============================================================================
   // INITIALIZATION
   // ============================================================================
   
-  /**
-   * Initialize conversation with welcome messages
-   */
   useEffect(() => {
     if (messages.length === 0) {
-      const welcomeMessages = generateWelcomeMessages();
-      setMessages(welcomeMessages);
+      // Add welcome message
+      setMessages([generateWelcomeMessage()]);
       
-      // Ask first question after welcome
+      // Start with first field
       setTimeout(() => {
-        const validation = validateFormData({});
-        const nextQuestion = generateNextQuestion(validation, {});
-        if (nextQuestion) {
-          setMessages(prev => [...prev, nextQuestion]);
-        }
-      }, 100);
+        const firstField = FIELD_ORDER[0];
+        setCurrentField(firstField);
+        setMessages(prev => [...prev, generateQuestionMessage(firstField)]);
+      }, 500);
     }
   }, []);
   
   // ============================================================================
   // HELPERS
   // ============================================================================
-  
-  /**
-   * Update form data and notify callback
-   */
-  const updateFormData = useCallback((newData: PartialIntakeInput) => {
-    setFormData(newData);
-    onFormDataChange?.(newData);
-  }, [onFormDataChange]);
   
   /**
    * Add message to conversation
@@ -165,65 +502,138 @@ export function useIntakeChatAgent(
   }, []);
   
   /**
-   * Process validation result and update state
+   * Update form data with nested path support
    */
-  const processValidation = useCallback((
-    validation: ValidateFormDataResult,
-    currentFormData: PartialIntakeInput
-  ) => {
-    lastValidationRef.current = validation;
-    
-    const state = determineConversationState(validation, currentFormData);
-    setIsComplete(state.isComplete);
-    setAwaitingConfirmation(state.awaitingConfirmation);
-    
-    return state;
+  const updateFormDataField = useCallback((field: string, value: unknown) => {
+    setFormData(prev => {
+      const updated = setNestedValue(prev as Record<string, unknown>, field, value);
+      onFormDataChange?.(updated);
+      return updated;
+    });
+  }, [onFormDataChange]);
+  
+  /**
+   * Find next missing field
+   */
+  const findNextField = useCallback((currentFormData: PartialIntakeInput): string | null => {
+    for (const field of FIELD_ORDER) {
+      if (!hasFieldValue(currentFormData, field)) {
+        return field;
+      }
+    }
+    return null;
   }, []);
   
   /**
-   * Handle user input and generate response
+   * Update missing fields based on current form data
    */
-  const processUserInput = useCallback(async (text: string) => {
+  const updateMissingFields = useCallback((currentFormData: PartialIntakeInput) => {
+    const missing = FIELD_ORDER.filter(field => !hasFieldValue(currentFormData, field));
+    setMissingFields(missing);
+    return missing;
+  }, []);
+  
+  /**
+   * Validate and check completeness
+   */
+  const validateAndCheckComplete = useCallback(async (currentFormData: PartialIntakeInput): Promise<boolean> => {
+    const validation = validateFormData(currentFormData);
+    
+    // Check if all required fields have values
+    const missing = updateMissingFields(currentFormData);
+    const complete = missing.length === 0;
+    
+    setIsComplete(complete);
+    return complete;
+  }, [updateMissingFields]);
+  
+  /**
+   * Handle user turn - MAIN FLOW
+   */
+  const handleUserTurn = useCallback(async (text: string) => {
     if (isProcessingRef.current) return;
     isProcessingRef.current = true;
     setLoading(true);
-    setError(null);
     
     try {
-      // Detect intent
-      const intent = detectIntent(text);
+      // 1. Add user message
+      const userMessage: ChatMessage = {
+        id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        role: 'user',
+        type: 'text',
+        content: text,
+        timestamp: new Date(),
+      };
+      addMessage(userMessage);
       
-      // Handle restart intent
-      if (intent.intent === 'restart') {
-        resetConversation();
+      // 2. Handle confirmation state
+      if (awaitingConfirmation) {
+        const lowerText = text.toLowerCase().trim();
+        
+        if (lowerText === 'confirm' || lowerText === 'ยืนยัน' || lowerText === 'yes' || lowerText === 'ใช่') {
+          // Submit booking
+          const result = await submitIntake(formData);
+          
+          if (result.success && result.jobId) {
+            setJobId(result.jobId);
+            setSuccess(true);
+            setAwaitingConfirmation(false);
+            addMessage(generateSuccessMessage(result.jobId));
+            onSuccess?.(result.jobId);
+          } else {
+            const errorMsg = result.error || 'ไม่สามารถบันทึกข้อมูลได้';
+            setError(errorMsg);
+            addMessage(generateErrorMessage(errorMsg));
+            onError?.(errorMsg);
+          }
+          
+          setLoading(false);
+          isProcessingRef.current = false;
+          return;
+        }
+        
+        if (lowerText === 'edit' || lowerText === 'แก้ไข' || lowerText === 'no') {
+          setAwaitingConfirmation(false);
+          // Find first field to edit
+          const nextField = findNextField(formData);
+          if (nextField) {
+            setCurrentField(nextField);
+            addMessage({
+              id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              role: 'assistant',
+              type: 'text',
+              content: 'กรุณาแก้ไขข้อมูลค่ะ',
+              timestamp: new Date(),
+            });
+            addMessage(generateQuestionMessage(nextField));
+          }
+          
+          setLoading(false);
+          isProcessingRef.current = false;
+          return;
+        }
+      }
+      
+      // 3. Parse user input based on current field
+      const fieldToParse = currentField || findNextField(formData);
+      
+      if (!fieldToParse) {
+        // All fields filled
+        const complete = await validateAndCheckComplete(formData);
+        
+        if (complete) {
+          setAwaitingConfirmation(true);
+          addMessage(generateSummaryMessage(formData));
+        }
+        
+        setLoading(false);
+        isProcessingRef.current = false;
         return;
       }
       
-      // Handle confirmation when awaiting confirmation
-      if (awaitingConfirmation) {
-        if (intent.intent === 'confirm') {
-          await handleConfirm();
-          return;
-        }
-        if (intent.intent === 'reject' || intent.intent === 'edit') {
-          setAwaitingConfirmation(false);
-          addMessage(createUserMessage(text));
-          addMessage({
-            id: `msg-${Date.now()}`,
-            role: 'assistant',
-            text: 'กรุณาบอกว่าต้องการแก้ไขข้อมูลส่วนไหนครับ',
-            timestamp: Date.now(),
-          });
-          return;
-        }
-      }
-      
-      // Get current field target from last assistant message
-      const lastAssistantMsg = [...messages].reverse().find(m => m.role === 'assistant');
-      const targetField = lastAssistantMsg?.meta?.field;
-      
-      // Try AI parsing first if configured
-      let parsed;
+      // 4. Try AI parsing first
+      let parsedValue: unknown = null;
+      let parseConfidence = 0;
       let aiResponse: string | undefined;
       
       try {
@@ -231,11 +641,8 @@ export function useIntakeChatAgent(
         if (aiEnabled) {
           const aiResult = await parseMessageWithAI(text, formData, messages.map(m => m.content));
           if (aiResult.confidence > 0.6 && aiResult.field && aiResult.value !== undefined) {
-            parsed = {
-              field: aiResult.field,
-              value: aiResult.value,
-              confidence: aiResult.confidence,
-            };
+            parsedValue = aiResult.value;
+            parseConfidence = aiResult.confidence;
             aiResponse = aiResult.response;
           }
         }
@@ -243,164 +650,152 @@ export function useIntakeChatAgent(
         console.error('AI parsing failed:', aiError);
       }
       
-      // Fallback to rule-based parsing if AI fails or not configured
-      if (!parsed) {
-        if (targetField) {
-          parsed = parseInput(text, targetField);
-        } else {
-          // Auto-detect field if no target
-          parsed = parseInput(text, 'unknown');
+      // 5. Fallback to rule-based parsing
+      if (!parsedValue) {
+        const ruleResult = parseInputForField(text, fieldToParse);
+        if (ruleResult) {
+          parsedValue = ruleResult.value;
+          parseConfidence = ruleResult.confidence;
         }
       }
       
-      // Apply parsed answer to form data
-      const newFormData = applyParsedAnswer(formData, parsed);
-      updateFormData(newFormData);
-      
-      // Validate
-      const validation = validateFormData(newFormData);
-      const state = processValidation(validation, newFormData);
-      
-      // Add user message
-      addMessage(createUserMessage(text));
-      
-      // Add acknowledgment (use AI response if available, otherwise rule-based)
-      if (aiResponse) {
-        addMessage({
-          id: `msg-${Date.now()}`,
-          role: 'assistant',
-          content: aiResponse,
-          type: 'text',
-          timestamp: new Date(),
-        } as ChatMessage);
-      } else if (parsed.confidence > 0.5 && parsed.value !== undefined) {
-        const ack = generateAcknowledgment(parsed.field, parsed.value, newFormData);
-        addMessage(ack);
-      }
-      
-      // Check if complete
-      if (state.isComplete) {
-        // Generate preview
-        const previewResult = await previewIntake(newFormData);
-        if (previewResult.success && previewResult.jobSpec) {
-          setPreview(previewResult.jobSpec);
-          const confirmationMsg = generateConfirmationMessage(newFormData);
-          addMessage(confirmationMsg);
+      // 6. Update formData with parsed value
+      if (parsedValue !== null) {
+        updateFormDataField(fieldToParse, parsedValue);
+        
+        // Create updated formData for validation
+        const updatedFormData = setNestedValue(
+          formData as Record<string, unknown>,
+          fieldToParse,
+          parsedValue
+        ) as PartialIntakeInput;
+        
+        // 7. Acknowledge
+        if (aiResponse) {
+          addMessage({
+            id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            role: 'assistant',
+            type: 'text',
+            content: aiResponse,
+            timestamp: new Date(),
+          });
         } else {
-          // If preview failed, show error and continue
-          const errorMsg = previewResult.error || 'ไม่สามารถสร้าง preview ได้';
-          addMessage(generateValidationError('preview', errorMsg));
-          
-          // Continue with next question
-          const nextQuestion = generateNextQuestion(validation, newFormData);
-          if (nextQuestion) {
-            addMessage(nextQuestion);
+          addMessage({
+            id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            role: 'assistant',
+            type: 'text',
+            content: generateAcknowledgment(fieldToParse, parsedValue),
+            timestamp: new Date(),
+          });
+        }
+        
+        // 8. Validate with updated data
+        const complete = await validateAndCheckComplete(updatedFormData);
+        
+        if (complete) {
+          // 9. All complete - show summary
+          setAwaitingConfirmation(true);
+          setPreview(updatedFormData as unknown as JobSpec);
+          addMessage(generateSummaryMessage(updatedFormData));
+        } else {
+          // 10. Find and ask next field
+          const nextField = findNextField(updatedFormData);
+          if (nextField) {
+            setCurrentField(nextField);
+            
+            // Try AI response generation
+            try {
+              const aiEnabled = await isAIConfigured();
+              if (aiEnabled) {
+                const missing = updateMissingFields(updatedFormData);
+                const aiResult = await generateAIResponse(
+                  text,
+                  updatedFormData,
+                  missing,
+                  messages.map(m => m.content)
+                );
+                if (aiResult.content) {
+                  addMessage({
+                    id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                    role: 'assistant',
+                    type: 'text',
+                    content: aiResult.content,
+                    timestamp: new Date(),
+                  });
+                }
+              }
+            } catch (aiError) {
+              console.error('AI response failed:', aiError);
+            }
+            
+            // Always ask next question
+            addMessage(generateQuestionMessage(nextField));
           }
         }
       } else {
-        // Continue with next question - try AI first
-        let nextQuestion: ChatMessage | null = null;
+        // Parse failed - ask again
+        addMessage({
+          id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          role: 'assistant',
+          type: 'text',
+          content: 'ขออภัย ไม่เข้าใจค่ะ กรุณาตอบใหม่อีกครั้ง',
+          timestamp: new Date(),
+        });
         
-        try {
-          const aiEnabled = await isAIConfigured();
-          if (aiEnabled) {
-            const aiResult = await generateAIResponse(
-              text,
-              newFormData,
-              validation.missingFields,
-              messages.map(m => m.content)
-            );
-            if (aiResult.content) {
-              nextQuestion = {
-                id: `msg-${Date.now()}`,
-                role: 'assistant',
-                content: aiResult.content,
-                type: 'text',
-                timestamp: new Date(),
-                quickReplies: aiResult.quickReplies,
-              } as ChatMessage;
-            }
-          }
-        } catch (aiError) {
-          console.error('AI response generation failed:', aiError);
-        }
-        
-        // Fallback to rule-based
-        if (!nextQuestion) {
-          nextQuestion = generateNextQuestion(validation, newFormData);
-        }
-        
-        if (nextQuestion) {
-          addMessage(nextQuestion);
+        if (currentField) {
+          addMessage(generateQuestionMessage(currentField));
         }
       }
       
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ';
+      const errorMsg = err instanceof Error ? err.message : 'เกิดข้อผิดพลาด';
       setError(errorMsg);
+      addMessage(generateErrorMessage(errorMsg));
       onError?.(errorMsg);
-      addMessage(generateSubmissionError(errorMsg));
     } finally {
       setLoading(false);
       isProcessingRef.current = false;
     }
-  }, [formData, messages, awaitingConfirmation, addMessage, updateFormData, processValidation]);
+  }, [
+    formData,
+    currentField,
+    awaitingConfirmation,
+    messages,
+    addMessage,
+    updateFormDataField,
+    validateAndCheckComplete,
+    findNextField,
+    updateMissingFields,
+    onSuccess,
+    onError,
+  ]);
   
   /**
-   * Handle confirmation and submit
-   */
-  const handleConfirm = useCallback(async () => {
-    if (!isComplete) return;
-    
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const result = await submitIntake(formData);
-      
-      if (result.success && result.jobId) {
-        setSuccess(true);
-        setAwaitingConfirmation(false);
-        onSuccess?.(result.jobId);
-        addMessage(generateSubmissionSuccess(result.jobId));
-      } else {
-        const errorMsg = result.error || 'ไม่สามารถบันทึกข้อมูลได้';
-        setError(errorMsg);
-        onError?.(errorMsg);
-        addMessage(generateSubmissionError(errorMsg));
-      }
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ';
-      setError(errorMsg);
-      onError?.(errorMsg);
-      addMessage(generateSubmissionError(errorMsg));
-    } finally {
-      setLoading(false);
-    }
-  }, [formData, isComplete, addMessage, onSuccess, onError]);
-  
-  // ============================================================================
-  // PUBLIC ACTIONS
-  // ============================================================================
-  
-  /**
-   * Send message
+   * Send message (public API)
    */
   const sendMessage = useCallback(async (text?: string) => {
     const messageText = text || inputText;
     if (!messageText.trim()) return;
     
     setInputText('');
-    await processUserInput(messageText.trim());
-  }, [inputText, processUserInput]);
+    await handleUserTurn(messageText.trim());
+  }, [inputText, handleUserTurn]);
   
   /**
    * Select quick reply
    */
-  const selectQuickReply = useCallback((option: QuickReplyOption) => {
-    setInputText(option.value);
-    sendMessage(option.value);
+  const selectQuickReply = useCallback((reply: QuickReply) => {
+    setInputText(reply.value);
+    sendMessage(reply.value);
   }, [sendMessage]);
+  
+  /**
+   * Confirm booking
+   */
+  const confirmBooking = useCallback(async () => {
+    if (!isComplete) return;
+    await handleUserTurn('confirm');
+  }, [isComplete, handleUserTurn]);
   
   /**
    * Reset conversation
@@ -408,36 +803,26 @@ export function useIntakeChatAgent(
   const resetConversation = useCallback(() => {
     setMessages([]);
     setFormData({});
+    setCurrentField(null);
+    setMissingFields(FIELD_ORDER.slice());
     setPreview(null);
     setIsComplete(false);
     setAwaitingConfirmation(false);
     setError(null);
     setSuccess(false);
+    setJobId(null);
     setInputText('');
     isProcessingRef.current = false;
-    lastValidationRef.current = null;
     
     // Re-initialize
-    const welcomeMessages = generateWelcomeMessages();
-    setMessages(welcomeMessages);
-    
     setTimeout(() => {
-      const validation = validateFormData({});
-      const nextQuestion = generateNextQuestion(validation, {});
-      if (nextQuestion) {
-        setMessages(prev => [...prev, nextQuestion]);
-      }
+      setMessages([generateWelcomeMessage()]);
+      const firstField = FIELD_ORDER[0];
+      setCurrentField(firstField);
+      setTimeout(() => {
+        setMessages(prev => [...prev, generateQuestionMessage(firstField)]);
+      }, 500);
     }, 100);
-  }, []);
-
-  /**
-   * Update a single field directly
-   */
-  const updateField = useCallback(<K extends keyof IntakeInput>(field: K, value: IntakeInput[K]) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value,
-    }));
   }, []);
   
   // ============================================================================
@@ -451,19 +836,17 @@ export function useIntakeChatAgent(
     sendMessage,
     selectQuickReply,
     resetConversation,
-    updateField,
-    formData: formData as IntakeFormData,
+    formData,
+    currentField,
+    missingFields,
     preview,
     isComplete,
     awaitingConfirmation,
     loading,
     error,
     success,
+    jobId,
   };
 }
-
-// ============================================================================
-// EXPORTS
-// ============================================================================
 
 export default useIntakeChatAgent;

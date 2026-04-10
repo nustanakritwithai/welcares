@@ -240,8 +240,9 @@ const quickFormStyles: Record<string, React.CSSProperties> = {
     borderRadius: '10px',
     border: '1px solid #7F77DD',
     fontSize: '15px',
-    color: '#333',  // <-- สีตัวหนังสือเข้ม
-    backgroundColor: '#fff',  // <-- พื้นหลังขาว
+    color: '#000',
+    WebkitTextFillColor: '#000',
+    backgroundColor: '#fff',
     boxSizing: 'border-box' as const,
   },
   buttons: {
@@ -807,9 +808,20 @@ export const IntakeChatDemo: React.FC<IntakeChatDemoProps> = ({
         <div style={styles.inputArea}>
           <div style={styles.inputContainer}>
             <input
-              ref={inputRef}
+              ref={inputRef as React.RefObject<HTMLInputElement>}
               type="text"
-              style={styles.input}
+              style={{
+                flex: 1,
+                border: '1px solid #E5E5E5',
+                borderRadius: '24px',
+                padding: '12px 16px',
+                fontSize: '15px',
+                color: '#000',
+                WebkitTextFillColor: '#000',
+                caretColor: '#000',
+                outline: 'none',
+                backgroundColor: '#fff',
+              }}
               placeholder={
                 isAwaitingConfirmation
                   ? 'กรุณายืนยันหรือแก้ไขข้อมูลด้านบน...'
@@ -817,7 +829,12 @@ export const IntakeChatDemo: React.FC<IntakeChatDemoProps> = ({
               }
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={handleKeyDown}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
               disabled={isTyping || isAwaitingConfirmation}
             />
             <button
@@ -1035,9 +1052,13 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '24px',
     padding: '12px 16px',
     fontSize: '15px',
+    color: '#000 !important',
+    WebkitTextFillColor: '#000 !important',
+    caretColor: '#000 !important',
     outline: 'none',
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#F8F9FA !important',
     transition: 'border-color 0.2s',
+    fontFamily: 'inherit',
   },
   sendButton: {
     width: '44px',
@@ -1310,6 +1331,17 @@ styleSheet.textContent = `
   @keyframes typingBounce {
     0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
     40% { transform: scale(1); opacity: 1; }
+  }
+  
+  /* FORCE black text on all inputs - override dark mode */
+  input[type="text"] {
+    color: #000 !important;
+    -webkit-text-fill-color: #000 !important;
+    background-color: #fff !important;
+  }
+  
+  input::placeholder {
+    color: #999 !important;
   }
 `;
 if (typeof document !== 'undefined') {
