@@ -10,7 +10,7 @@
  */
 
 import React, { useRef, useEffect, useState } from 'react';
-import { useAgentChat } from '../hooks/useAgentChat';
+import { useAgentChat, getStoredApiKey, setStoredApiKey, clearStoredApiKey } from '../hooks/useAgentChat';
 import type { BookingData, AgentStatus } from '../hooks/useAgentChat';
 
 // ============================================================================
@@ -145,6 +145,27 @@ function TypingIndicator() {
 // ============================================================================
 
 export function AgentChat() {
+  // API Key state
+  const [apiKey, setApiKey] = useState(() => getStoredApiKey());
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [showApiPanel, setShowApiPanel] = useState(() => !getStoredApiKey());
+
+  const handleSaveKey = () => {
+    const k = apiKeyInput.trim();
+    if (!k) return;
+    setStoredApiKey(k);
+    setApiKey(k);
+    setApiKeyInput('');
+    setShowApiPanel(false);
+  };
+
+  const handleClearKey = () => {
+    clearStoredApiKey();
+    setApiKey('');
+    setApiKeyInput('');
+    setShowApiPanel(true);
+  };
+
   const {
     messages,
     bookingData,
@@ -156,7 +177,7 @@ export function AgentChat() {
     sendMessage,
     selectQuickReply,
     resetChat,
-  } = useAgentChat();
+  } = useAgentChat(apiKey);
 
   const [inputText, setInputText] = useState('');
   const [showProgress, setShowProgress] = useState(false);
@@ -190,14 +211,72 @@ export function AgentChat() {
           <div style={styles.headerName}>น้องแคร์</div>
           <div style={styles.headerSub}>WelCares Booking Agent</div>
         </div>
-        <button
-          onClick={() => { resetChat(); setShowProgress(false); }}
-          style={styles.resetBtn}
-          title="เริ่มใหม่"
-        >
-          🔄
-        </button>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          {/* API Key toggle */}
+          <button
+            onClick={() => setShowApiPanel(v => !v)}
+            style={{
+              ...styles.resetBtn,
+              background: apiKey ? 'rgba(255,255,255,0.25)' : 'rgba(255,80,80,0.5)',
+              fontSize: 13,
+            }}
+            title={apiKey ? 'API Key ตั้งค่าแล้ว — แตะเพื่อแก้ไข' : 'ยังไม่มี API Key — แตะเพื่อตั้งค่า'}
+          >
+            🔐
+          </button>
+          <button
+            onClick={() => { resetChat(); setShowProgress(false); }}
+            style={styles.resetBtn}
+            title="เริ่มใหม่"
+          >
+            🔄
+          </button>
+        </div>
       </div>
+
+      {/* API Key Panel */}
+      {showApiPanel && (
+        <div style={styles.apiPanel}>
+          <div style={styles.apiPanelTitle}>🔐 OpenRouter API Key</div>
+          <input
+            style={styles.apiInput}
+            type="password"
+            placeholder="sk-or-v1-..."
+            value={apiKeyInput}
+            onChange={e => setApiKeyInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSaveKey()}
+          />
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <button
+              style={{ ...styles.apiBtn, background: '#06C755', color: 'white', flex: 1 }}
+              onClick={handleSaveKey}
+              disabled={!apiKeyInput.trim()}
+            >
+              บันทึก
+            </button>
+            {apiKey && (
+              <button
+                style={{ ...styles.apiBtn, background: '#fee2e2', color: '#dc2626' }}
+                onClick={handleClearKey}
+              >
+                ล้าง
+              </button>
+            )}
+            <button
+              style={{ ...styles.apiBtn, background: '#f1f5f9', color: '#64748b' }}
+              onClick={() => setShowApiPanel(false)}
+            >
+              ปิด
+            </button>
+          </div>
+          <div style={styles.apiHelp}>
+            รับ API Key ฟรีได้ที่{' '}
+            <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" style={{ color: '#06C755' }}>
+              openrouter.ai/keys
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* Progress card (collapsible) */}
       {showProgress && (
@@ -509,6 +588,43 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     fontWeight: 700,
     cursor: 'pointer',
+  },
+
+  // API key panel
+  apiPanel: {
+    background: 'white',
+    borderBottom: '1px solid #E2E8F0',
+    padding: '10px 14px',
+    flexShrink: 0,
+  },
+  apiPanelTitle: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: '#334155',
+    marginBottom: 6,
+  },
+  apiInput: {
+    width: '100%',
+    border: '1px solid #CBD5E1',
+    borderRadius: 8,
+    padding: '7px 10px',
+    fontSize: 12,
+    outline: 'none',
+    boxSizing: 'border-box' as const,
+    background: '#F8FAFC',
+  },
+  apiBtn: {
+    border: 'none',
+    borderRadius: 8,
+    padding: '6px 12px',
+    fontSize: 11,
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+  apiHelp: {
+    marginTop: 6,
+    fontSize: 10,
+    color: '#94A3B8',
   },
 };
 

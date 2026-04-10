@@ -56,11 +56,25 @@ export interface AgentChatActions {
   resetChat: () => void;
 }
 
+// ── localStorage key ──────────────────────────────────────────────────────
+const STORAGE_KEY = 'welcares_api_key';
+
+export function getStoredApiKey(): string {
+  try { return localStorage.getItem(STORAGE_KEY) ?? ''; } catch { return ''; }
+}
+export function setStoredApiKey(key: string): void {
+  try { localStorage.setItem(STORAGE_KEY, key); } catch { /* noop */ }
+}
+export function clearStoredApiKey(): void {
+  try { localStorage.removeItem(STORAGE_KEY); } catch { /* noop */ }
+}
+
 // ── API call ───────────────────────────────────────────────────────────────
 
 async function postToAgent(
   message: string,
-  sessionId: string | null
+  sessionId: string | null,
+  apiKey: string,
 ): Promise<{
   sessionId: string;
   message: string;
@@ -73,7 +87,7 @@ async function postToAgent(
   const res = await fetch('/api/agent/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, sessionId }),
+    body: JSON.stringify({ message, sessionId, apiKey: apiKey || undefined }),
   });
 
   if (!res.ok) {
@@ -98,7 +112,7 @@ const WELCOME: ChatMessage = {
 // HOOK
 // ============================================================================
 
-export function useAgentChat(): AgentChatState & AgentChatActions {
+export function useAgentChat(apiKey: string): AgentChatState & AgentChatActions {
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME]);
   const [bookingData, setBookingData] = useState<BookingData>({});
   const [status, setStatus] = useState<AgentStatus>('collecting');
@@ -127,7 +141,7 @@ export function useAgentChat(): AgentChatState & AgentChatActions {
     setIsThinking(true);
 
     try {
-      const data = await postToAgent(trimmed, sessionIdRef.current);
+      const data = await postToAgent(trimmed, sessionIdRef.current, apiKey);
 
       // Store session ID from server
       sessionIdRef.current = data.sessionId;

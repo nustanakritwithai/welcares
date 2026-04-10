@@ -29,7 +29,19 @@ router.post('/chat', async (req, res) => {
     });
   }
 
-  const { sessionId, message } = req.body ?? {};
+  const { sessionId, message, apiKey: bodyApiKey } = req.body ?? {};
+
+  // Allow client to provide their own API key (overrides server key)
+  const resolvedKey = (typeof bodyApiKey === 'string' && bodyApiKey.trim())
+    ? bodyApiKey.trim()
+    : apiKey;
+
+  if (!resolvedKey) {
+    return res.status(503).json({
+      error: 'AI not configured',
+      message: 'กรุณาใส่ OpenRouter API Key ในช่องตั้งค่าด้านบนก่อนค่ะ',
+    });
+  }
 
   if (!message || typeof message !== 'string' || !message.trim()) {
     return res.status(400).json({ error: 'message is required' });
@@ -38,7 +50,7 @@ router.post('/chat', async (req, res) => {
   const session = getOrCreateSession(sessionId as string | undefined);
 
   try {
-    const response = await runAgentLoop(session, message.trim(), apiKey);
+    const response = await runAgentLoop(session, message.trim(), resolvedKey);
     return res.json(response);
   } catch (err) {
     console.error('[POST /api/agent/chat] error:', err);
