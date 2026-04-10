@@ -10,6 +10,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import jobRoutes from './routes/jobs.js';
 
 // Load env vars
 dotenv.config();
@@ -41,14 +42,24 @@ app.use(express.json());
 // API ROUTES
 // ============================================================================
 
+// Job Store routes — ใช้โดย Intake Agent และ Dispatch Agent
+app.use('/api/jobs', jobRoutes);
+
 /**
  * Health check
  */
 app.get('/api/health', (_req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     aiConfigured: !!API_KEY,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    endpoints: [
+      'POST   /api/jobs',
+      'GET    /api/jobs',
+      'GET    /api/jobs/:id',
+      'PATCH  /api/jobs/:id/state',
+      'DELETE /api/jobs/:id',
+    ],
   });
 });
 
@@ -141,9 +152,16 @@ app.listen(PORT, () => {
 🚀 WelCares Server running on http://localhost:${PORT}
 
 📡 API Endpoints:
-  GET  /api/health           - Health check
-  GET  /api/models           - List available models
-  POST /api/chat/completions - Chat with AI (proxies to OpenRouter)
+  GET    /api/health              - Health check
+  GET    /api/models              - List available models
+  POST   /api/chat/completions    - Chat with AI (proxies to OpenRouter)
+
+📋 Job Store:
+  POST   /api/jobs                - Create job from JobSpec
+  GET    /api/jobs                - List jobs (filter by state/source)
+  GET    /api/jobs/:id            - Get job by ID
+  PATCH  /api/jobs/:id/state      - Transition job state
+  DELETE /api/jobs/:id            - Delete completed/cancelled job
 
 🤖 AI Status: ${API_KEY ? '✅ Configured' : '❌ Not configured'}
   `);
