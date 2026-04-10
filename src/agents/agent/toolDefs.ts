@@ -84,4 +84,37 @@ export const TOOL_DEFINITIONS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'check_availability',
+      description: 'ตรวจสอบว่ามีเจ้าหน้าที่ว่างในวันและเวลาที่ต้องการไหม',
+      parameters: {
+        type: 'object',
+        properties: {
+          date: { type: 'string', description: 'YYYY-MM-DD' },
+          time: { type: 'string', description: 'HH:MM' },
+          serviceType: { type: 'string' },
+        },
+        required: ['date'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'estimate_price',
+      description: 'ประมาณราคาบริการจากจุดรับและจุดส่ง',
+      parameters: {
+        type: 'object',
+        properties: {
+          pickup: { type: 'string' },
+          dropoff: { type: 'string' },
+          serviceType: { type: 'string' },
+          mobilityLevel: { type: 'string' },
+        },
+        required: ['pickup', 'dropoff'],
+      },
+    },
+  },
 ];

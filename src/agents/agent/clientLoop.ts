@@ -225,6 +225,45 @@ function executeTool(name: string, argsJson: string, booking: BookingData): Tool
       }
     }
 
+    case 'check_availability': {
+      const d = new Date(String(args.date ?? ''));
+      const dow = isNaN(d.getTime()) ? -1 : d.getDay();
+      const available = dow >= 1 && dow <= 5;
+      const slots = available
+        ? ['08:00','09:00','10:00','13:00','14:00','15:00']
+        : ['10:00','14:00'];
+      return {
+        data: {
+          available,
+          slots,
+          message: available
+            ? `มีเจ้าหน้าที่ว่าง ${slots.length} ช่วงเวลาในวันนั้น`
+            : 'วันหยุดสุดสัปดาห์ มีเจ้าหน้าที่จำกัด',
+        },
+      };
+    }
+
+    case 'estimate_price': {
+      const base: Record<string, number> = {
+        'hospital-visit': 1500, 'dialysis': 2200, 'chemotherapy': 2500,
+        'radiation': 2500, 'physical-therapy': 1800, 'checkup': 1200,
+        'vaccination': 900, 'other': 1500,
+      };
+      const mobAdd: Record<string, number> = {
+        independent: 0, assisted: 200, wheelchair: 400, bedridden: 800,
+      };
+      const svcType = String(args.serviceType ?? 'other');
+      const mob = String(args.mobilityLevel ?? 'independent');
+      const price = (base[svcType] ?? 1500) + (mobAdd[mob] ?? 0);
+      return {
+        data: {
+          estimatedPrice: `฿${price.toLocaleString()}`,
+          breakdown: { base: base[svcType] ?? 1500, mobilityAdd: mobAdd[mob] ?? 0, total: price },
+          note: 'ราคาประมาณ ไม่รวมค่าเดินทางเพิ่มเติม',
+        },
+      };
+    }
+
     default:
       return { data: { error: `Unknown tool: ${name}` } };
   }
