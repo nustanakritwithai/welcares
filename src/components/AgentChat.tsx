@@ -9,7 +9,7 @@
  * @module src/components/AgentChat
  */
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useAgentChat, getStoredApiKey, setStoredApiKey, clearStoredApiKey } from '../hooks/useAgentChat';
 import type { BookingData, AgentStatus } from '../hooks/useAgentChat';
 
@@ -74,19 +74,84 @@ interface BookingProgressProps {
   jobId?: string;
 }
 
+// ============================================================================
+// WORKFLOW CARD — shown after submission
+// ============================================================================
+
+type StepStatus = 'pending' | 'running' | 'done';
+interface WFStep { id: string; icon: string; label: string; detail: string; status: StepStatus; }
+
+function WorkflowCard({ jobId, data }: { jobId: string; data: BookingData }) {
+  const phone = data.contact?.phone ?? '';
+  const dateTime = [data.schedule?.date, data.schedule?.time].filter(Boolean).join(' ');
+
+  const initial: WFStep[] = [
+    { id: 'intake',   icon: '📋', label: 'รับการจอง',        detail: jobId,                           status: 'done'    },
+    { id: 'dispatch', icon: '🚗', label: 'จัดหาเจ้าหน้าที่', detail: 'กำลังจับคู่...',               status: 'running' },
+    { id: 'notify',   icon: '📱', label: 'แจ้งครอบครัว',     detail: `SMS → ${phone}`,               status: 'pending' },
+    { id: 'confirm',  icon: '✅', label: 'ยืนยันการเดินทาง', detail: dateTime || 'ตามเวลาที่จอง',    status: 'pending' },
+  ];
+  const [steps, setSteps] = useState<WFStep[]>(initial);
+
+  useEffect(() => {
+    const advance = (idx: number, detail: string, delay: number) =>
+      setTimeout(() => setSteps(prev => prev.map((s, i) => {
+        if (i === idx)     return { ...s, status: 'done', detail };
+        if (i === idx + 1) return { ...s, status: 'running' };
+        return s;
+      })), delay);
+
+    const t1 = advance(1, 'จับคู่เจ้าหน้าที่แล้ว',   1600);
+    const t2 = advance(2, `แจ้ง SMS → ${phone}`,      3000);
+    const t3 = advance(3, 'ยืนยันแล้ว — พร้อมรับบริการ', 4400);
+    return () => [t1, t2, t3].forEach(clearTimeout);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobId]);
+
+  const stepColor = (s: StepStatus) =>
+    s === 'done' ? '#059669' : s === 'running' ? '#D97706' : '#94A3B8';
+
+  return (
+    <div style={{ padding: '8px 12px' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <span style={{ fontSize: 14 }}>🎉</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#059669' }}>จองสำเร็จ!</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, background: '#D1FAE5', color: '#065F46', borderRadius: 4, padding: '2px 7px' }}>{jobId}</span>
+      </div>
+      {/* Booking summary */}
+      <div style={{ background: '#F0FDF4', borderRadius: 8, padding: '6px 10px', marginBottom: 8, fontSize: 10, color: '#1E293B', lineHeight: 1.8 }}>
+        <div>👤 <b>{data.contact?.name}</b> · 📞 {data.contact?.phone}</div>
+        <div>🏥 {SERVICE_LABELS[data.service?.type ?? ''] ?? data.service?.type} · 🗓 {dateTime}</div>
+        <div>📍 จาก: {data.locations?.pickup}</div>
+        <div>📍 ถึง: {data.locations?.dropoff}</div>
+        <div>🧑‍🦽 {data.patient?.name} · {MOBILITY_LABELS[data.patient?.mobilityLevel ?? ''] ?? data.patient?.mobilityLevel}</div>
+      </div>
+      {/* Workflow steps */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {steps.map(s => (
+          <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 13 }}>{s.icon}</span>
+            <div style={{ flex: 1 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: stepColor(s.status) }}>{s.label}</span>
+              <span style={{ fontSize: 9, color: '#64748B', marginLeft: 4 }}>{s.detail}</span>
+            </div>
+            <span style={{ fontSize: 10 }}>
+              {s.status === 'done' ? '✅' : s.status === 'running' ? '⏳' : '○'}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function BookingProgress({ data, missingFields, status, jobId }: BookingProgressProps) {
   const filled = REQUIRED_FIELDS.filter(f => !missingFields.includes(f));
   const pct = Math.round((filled.length / REQUIRED_FIELDS.length) * 100);
 
   if (status === 'submitted' && jobId) {
-    return (
-      <div style={styles.progressCard}>
-        <div style={{ ...styles.progressTitle, color: '#059669' }}>
-          ✅ จองเรียบร้อยแล้ว
-        </div>
-        <div style={{ fontSize: 11, color: '#047857', fontWeight: 700 }}>{jobId}</div>
-      </div>
-    );
+    return <WorkflowCard jobId={jobId} data={data} />;
   }
 
   if (filled.length === 0) return null;
@@ -188,11 +253,11 @@ export function AgentChat() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isThinking]);
 
-  // Show progress card after first data arrives
+  // Show progress card after first data arrives, or always on submitted
   useEffect(() => {
     const hasSomeData = REQUIRED_FIELDS.some(f => !missingFields.includes(f));
-    if (hasSomeData) setShowProgress(true);
-  }, [missingFields]);
+    if (hasSomeData || status === 'submitted') setShowProgress(true);
+  }, [missingFields, status]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -285,7 +350,7 @@ export function AgentChat() {
             onClick={() => setShowProgress(v => !v)}
             style={styles.progressToggle}
           >
-            📋 ข้อมูลการจอง — แตะเพื่อดู/ซ่อน
+            {status === 'submitted' ? '🎉 สรุปการจอง — แตะเพื่อดู/ซ่อน' : '📋 ข้อมูลการจอง — แตะเพื่อดู/ซ่อน'}
           </button>
           <BookingProgress
             data={bookingData}
@@ -343,7 +408,7 @@ export function AgentChat() {
           value={inputText}
           onChange={e => setInputText(e.target.value)}
           placeholder={isThinking ? 'น้องแคร์กำลังคิด...' : 'พิมพ์ข้อความ...'}
-          disabled={isThinking || status === 'submitted'}
+          disabled={isThinking}
         />
         <button
           type="submit"
