@@ -1,4 +1,5 @@
 import { BaseAgent, AgentInput, AgentOutput, AgentConfig } from './BaseAgent';
+import { buildDraftJobSpec, saveJobToStore } from './shared/jobStoreClient';
 
 /**
  * Chat Booking Agent - Agent ที่ช่วยจัดการการจองบริการผ่านแชท
@@ -39,6 +40,8 @@ export interface ChatBookingOutput extends AgentOutput {
   missing_required_fields?: string[];
   clarification_needed: boolean;
   clarification_question?: string;
+  /** jobId ที่บันทึกลง JobStore สำเร็จ (มีเฉพาะเมื่อ booking entities ครบ) */
+  jobId?: string;
   suggested_actions?: Array<{
     type: 'FILE_OPERATION' | 'SKILL_USE' | 'API_CALL' | 'USER_INPUT';
     description: string;
@@ -354,6 +357,32 @@ ${contextInfo}
   }
 
   /**
+   * บันทึก draft job ลง JobStore เมื่อ booking entities ครบ
+   * fire-and-forget — ไม่ block result ถ้า store ไม่ตอบสนอง
+   */
+  private async attemptJobCreation(
+    intent: ChatBookingOutput['intent'],
+    entities: ChatBookingOutput['extracted_entities'],
+    sessionId?: string
+  ): Promise<string | undefined> {
+    try {
+      const sid = sessionId ?? `chat-${Date.now()}`;
+      const draftSpec = buildDraftJobSpec(intent, entities, sid);
+      const saveResult = await saveJobToStore(draftSpec, { source: 'chat', sessionId: sid });
+      if (saveResult.success) {
+        this.log('info', `[ChatBookingAgent] Draft job saved: ${saveResult.jobId}`);
+        return saveResult.jobId;
+      }
+      this.log('warn', `[ChatBookingAgent] Failed to save job: ${saveResult.error}`);
+    } catch (err) {
+      this.log('warn', '[ChatBookingAgent] Job save threw', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return undefined;
+  }
+
+  /**
    * จัดการการจองรถ
    */
   private async handleTripBooking(
@@ -436,7 +465,11 @@ ${contextInfo}
     });
 
     result.intent = 'BOOK_TRIP';
-    result.confidence_score = Math.min(0.95, (result.confidence_score || 0.7) + 0.1); // เพิ่มความเชื่อมั่นเมื่อมีข้อมูลครบ
+    result.confidence_score = Math.min(0.95, (result.confidence_score || 0.7) + 0.1);
+
+    // บันทึก draft job ลง JobStore (fire-and-forget)
+    result.jobId = await this.attemptJobCreation('BOOK_TRIP', result.extracted_entities, input.sessionId);
+
     return result;
   }
 
@@ -485,6 +518,10 @@ ${contextInfo}
 
     result.intent = 'BOOK_MEDICINE';
     result.confidence_score = Math.min(0.95, (result.confidence_score || 0.7) + 0.1);
+
+    // บันทึก draft job ลง JobStore (fire-and-forget)
+    result.jobId = await this.attemptJobCreation('BOOK_MEDICINE', result.extracted_entities, input.sessionId);
+
     return result;
   }
 
@@ -533,6 +570,10 @@ ${contextInfo}
 
     result.intent = 'BOOK_HOME_CARE';
     result.confidence_score = Math.min(0.95, (result.confidence_score || 0.7) + 0.1);
+
+    // บันทึก draft job ลง JobStore (fire-and-forget)
+    result.jobId = await this.attemptJobCreation('BOOK_HOME_CARE', result.extracted_entities, input.sessionId);
+
     return result;
   }
 

@@ -97,7 +97,7 @@ describe('getConfig', () => {
   it('should return default config when env not set', () => {
     const config = getConfig();
 
-    expect(config.baseUrl).toBe('https://api.welcares.com/v1');
+    expect(config.baseUrl).toBe('/api');
     expect(config.timeout).toBe(30000);
     expect(config.retryAttempts).toBe(3);
     expect(config.retryDelay).toBe(1000);
@@ -365,7 +365,7 @@ describe('submitIntake', () => {
     await submitIntake(input);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.welcares.com/v1/intake/submit',
+      '/api/intake/submit',
       expect.objectContaining({
         method: 'POST',
         headers: {

@@ -11,6 +11,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import jobRoutes from './routes/jobs.js';
+import intakeRoutes from './routes/intake.js';
 
 // Load env vars
 dotenv.config();
@@ -44,6 +45,9 @@ app.use(express.json());
 
 // Job Store routes — ใช้โดย Intake Agent และ Dispatch Agent
 app.use('/api/jobs', jobRoutes);
+
+// Intake bridge — รับ submit จาก submitIntake() แล้วเก็บลง JobStore
+app.use('/api/intake', intakeRoutes);
 
 /**
  * Health check
@@ -162,6 +166,10 @@ app.listen(PORT, () => {
   GET    /api/jobs/:id            - Get job by ID
   PATCH  /api/jobs/:id/state      - Transition job state
   DELETE /api/jobs/:id            - Delete completed/cancelled job
+
+🔗 Intake Bridge:
+  POST   /api/intake/submit       - Submit intake form → JobStore (ใช้โดย submitIntake())
+  GET    /api/intake/jobs         - List jobs from intake source
 
 🤖 AI Status: ${API_KEY ? '✅ Configured' : '❌ Not configured'}
   `);

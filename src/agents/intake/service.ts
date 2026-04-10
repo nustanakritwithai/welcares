@@ -36,9 +36,14 @@ import {
 
 /**
  * Default configuration
+ *
+ * Base URL ใช้ relative path ('/api') เพื่อให้ Vite proxy forward ไปยัง Express server
+ * Override ได้ผ่าน VITE_INTAKE_API_URL (browser) หรือ INTAKE_API_URL (Node/test)
  */
 const DEFAULT_CONFIG: IntakeServiceConfig = {
-  baseUrl: process.env.INTAKE_API_URL || 'https://api.welcares.com/v1',
+  baseUrl: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_INTAKE_API_URL)
+    || process.env.INTAKE_API_URL
+    || '/api',
   timeout: 30000,        // 30 seconds
   retryAttempts: 3,      // 3 attempts total (initial + 2 retries)
   retryDelay: 1000,      // 1 second between retries
@@ -50,7 +55,9 @@ const DEFAULT_CONFIG: IntakeServiceConfig = {
  */
 function getConfig(): IntakeServiceConfig {
   return {
-    baseUrl: process.env.INTAKE_API_URL || DEFAULT_CONFIG.baseUrl,
+    baseUrl: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_INTAKE_API_URL)
+      || process.env.INTAKE_API_URL
+      || DEFAULT_CONFIG.baseUrl,
     timeout: parseInt(process.env.INTAKE_API_TIMEOUT || '', 10) || DEFAULT_CONFIG.timeout,
     retryAttempts: parseInt(process.env.INTAKE_RETRY_ATTEMPTS || '', 10) || DEFAULT_CONFIG.retryAttempts,
     retryDelay: parseInt(process.env.INTAKE_RETRY_DELAY || '', 10) || DEFAULT_CONFIG.retryDelay,
