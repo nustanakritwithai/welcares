@@ -47,6 +47,27 @@ export function getAssignedJobs(assignedTo?: string): StoredJob[] {
   ).filter(j => !assignedTo || j.assignedTo === assignedTo);
 }
 
+/** Job ที่กำลังดำเนินการ (assigned หรือ active) */
+export function getActiveJob(): StoredJob | undefined {
+  return getJobs().find(j => j.status === 'active' || j.status === 'assigned');
+}
+
+/** Jobs ที่ status=active */
+export function getRunningJobs(): StoredJob[] {
+  return getJobs().filter(j => j.status === 'active');
+}
+
+/** นับ jobs แยกตาม status */
+export function getJobCounts(): Record<JobStatus | 'total', number> {
+  const jobs = getJobs();
+  const counts: Record<string, number> = { total: jobs.length };
+  for (const j of jobs) {
+    const s = j.status ?? 'pending';
+    counts[s] = (counts[s] ?? 0) + 1;
+  }
+  return counts as Record<JobStatus | 'total', number>;
+}
+
 // ── writes ─────────────────────────────────────────────────────────────────
 
 function saveJobs(jobs: StoredJob[]): void {
