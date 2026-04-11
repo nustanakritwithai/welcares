@@ -46,7 +46,10 @@ function HamMenu({items,onClose}){
 
 function PhoneShell({navItems,hamItems,sos=false,grandma=false,title}){
   const[navIdx,setNavIdx]=useState(0);const[subIdx,setSubIdx]=useState(0);const[ham,setHam]=useState(false);const[hamPage,setHamPage]=useState(null);
+  const[bdg,setBdg]=useState([0,0,0,0,0]);
+  useEffect(()=>{const load=()=>{try{const js=JSON.parse(localStorage.getItem('welcares_bookings')||'[]');const p=js.filter(j=>!j.status||j.status==='pending').length;const a=js.filter(j=>j.status==='assigned'||j.status==='active').length;setBdg([0,a,p,0,0]);}catch{}};load();window.addEventListener('welcares_jobs_updated',load);return()=>window.removeEventListener('welcares_jobs_updated',load);},[]);
   const selectNav=i=>{setNavIdx(i);setSubIdx(0);};
+  const goTo=(i,j=0)=>{setNavIdx(i);setSubIdx(j);};
   const pages=navItems[navIdx]?.pages||[];const page=pages[subIdx]||pages[0];
   const hamFn=(hamItems||[]).map(item=>typeof item==='string'?item:item.hamPage?{...item,fn:()=>{setHam(false);setHamPage(item.hamPage);}}:item);
   return(
@@ -64,12 +67,15 @@ function PhoneShell({navItems,hamItems,sos=false,grandma=false,title}){
           {pages.length>1&&<div style={{display:'flex',background:C.bg,borderBottom:'1px solid '+C.bdr,flexShrink:0,overflowX:'auto'}}>
             {pages.map((p,i)=><button key={i} onClick={()=>setSubIdx(i)} style={{flex:1,padding:'5px 2px',border:'none',borderBottom:`2px solid ${subIdx===i?C.pri:'transparent'}`,background:'none',fontSize:9,color:subIdx===i?C.pri:C.mid,cursor:'pointer',fontWeight:subIdx===i?700:400,whiteSpace:'nowrap',minWidth:45}}>{p.label}</button>)}
           </div>}
-          {page&&page.content({openHam:()=>setHam(true)})}
+          {page&&page.content({openHam:()=>setHam(true),goTo})}
           {sos&&<SOSBar/>}
         </div>
         <div style={{borderTop:'1px solid '+C.bdr,display:'flex',background:'#fff',flexShrink:0}}>
           {navItems.map((item,i)=><button key={i} onClick={()=>selectNav(i)} style={{flex:1,padding:'5px 2px',border:'none',background:'none',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:1}}>
-            <span style={{fontSize:grandma?18:15}}>{item.icon}</span>
+            <div style={{position:'relative',display:'inline-flex'}}>
+              <span style={{fontSize:grandma?18:15}}>{item.icon}</span>
+              {(bdg[i]||0)>0&&navIdx!==i&&<div style={{position:'absolute',top:-2,right:-3,width:7,height:7,borderRadius:'50%',background:C.dan,border:'1.5px solid #fff'}}/>}
+            </div>
             <span style={{fontSize:grandma?8:7,color:navIdx===i?C.pri:C.mid,fontWeight:navIdx===i?700:400,lineHeight:1.1,textAlign:'center'}}>{item.label}</span>
             {navIdx===i&&<div style={{width:14,height:2,background:C.pri,borderRadius:1}}/>}
           </button>)}
@@ -913,15 +919,16 @@ function CTOpContact(){
 }
 
 // CTJobBoard with income graph (instruction 15)
-function CTJobBoard(){
+function CTJobBoard({goTo,myTier}){
   const[wage,sw]=useState(1500);const[avail,sa]=useState([2,3,4]);
-  const[lsJobs,setLsJobs]=useState([]);
+  const[lsJobs,setLsJobs]=useState([]);const[acceptedId,setAcceptedId]=useState(null);const[showAll,setShowAll]=useState(false);
   const days=['จ','อ','พ','พฤ','ศ','ส','อา'];
   const SVC={'hospital-visit':'🤝 เพื่อนหาหมอ','dialysis':'🩸 ล้างไต','chemotherapy':'💉 เคมีบำบัด','radiation':'☢️ รังสีรักษา','physical-therapy':'🏃 กายภาพบำบัด','checkup':'🔍 ตรวจสุขภาพ','vaccination':'💉 วัคซีน','other':'🏥 บริการทั่วไป'};
   const TR={'independent':'CG','assisted':'CG','wheelchair':'PN','bedridden':'RN'};
   useEffect(()=>{const load=()=>{try{const sv=JSON.parse(localStorage.getItem('welcares_bookings')||'[]');setLsJobs(sv.filter(b=>b.status!=='cancelled').map(b=>{const bd=b.bookingData||{};return{type:SVC[bd.service?.type]||'🏥 งานใหม่',hosp:bd.locations?.dropoff||'-',date:[bd.schedule?.date,bd.schedule?.time].filter(Boolean).join(' ')||'-',pay:'฿1,500',tier:TR[bd.patient?.mobilityLevel]||'CG',ok:true,jobId:b.jobId,patient:bd.patient?.name,status:b.status||'pending',isNew:true};}));}catch{setLsJobs([]);}};load();window.addEventListener(JOB_UPDATED_EVENT,load);return()=>window.removeEventListener(JOB_UPDATED_EVENT,load);},[]);
-  const handleAccept=jobId=>assignJob(jobId,'คุณรู้ใจ');
-  const jobs=[...lsJobs,{type:'🤝 เพื่อนหาหมอ',hosp:'รพ.ศิริราช',date:'20 พ.ค.',pay:'฿1,680',tier:'PN',ok:true},{type:'🤝 เพื่อนหาหมอ',hosp:'รพ.จุฬา',date:'21 พ.ค.',pay:'฿1,200',tier:'CG',ok:false},{type:'🚗 รถรับส่ง',hosp:'รพ.กลาง',date:'23 พ.ค.',pay:'฿500',tier:'Driver',ok:true}];
+  const handleAccept=jobId=>{assignJob(jobId,'คุณรู้ใจ');setAcceptedId(jobId);if(goTo)setTimeout(()=>goTo(0),1800);};
+  const allJobs=[...lsJobs,{type:'🤝 เพื่อนหาหมอ',hosp:'รพ.ศิริราช',date:'20 พ.ค.',pay:'฿1,680',tier:'PN',ok:true},{type:'🤝 เพื่อนหาหมอ',hosp:'รพ.จุฬา',date:'21 พ.ค.',pay:'฿1,200',tier:'CG',ok:false},{type:'🚗 รถรับส่ง',hosp:'รพ.กลาง',date:'23 พ.ค.',pay:'฿500',tier:'Driver',ok:true}];
+  const jobs=showAll||!myTier?allJobs:allJobs.filter(j=>!j.tier||j.tier===myTier);
   return <div style={{background:C.bg}}>
     <AB t="📋 รับงาน + ตารางเวลา" bg={C.drk}/>
     <div style={{padding:'8px 9px'}}>
@@ -936,6 +943,7 @@ function CTJobBoard(){
       <div style={{display:'flex',gap:2,marginBottom:6}}>{days.map((d,i)=><div key={i} onClick={()=>sa(s=>s.includes(i)?s.filter(x=>x!==i):[...s,i])} style={{flex:1,borderRadius:6,padding:'4px 2px',textAlign:'center',fontSize:8,border:`1px solid ${avail.includes(i)?C.suc:C.bdr}`,background:avail.includes(i)?'#ECFDF5':'#F8FAFC',color:avail.includes(i)?C.suc:C.mid,cursor:'pointer',fontWeight:avail.includes(i)?700:400}}>{d}{avail.includes(i)&&<div style={{fontSize:6}}>{"✓"}</div>}</div>)}</div>
       <HR/>
       <ST ic="📋" ch={"งานที่เปิดรับ ("+jobs.length+")"}/>
+      {myTier&&<div style={{display:'flex',gap:3,marginBottom:4}}><button onClick={()=>setShowAll(false)} style={{flex:1,padding:'3px 6px',borderRadius:5,border:`1px solid ${!showAll?C.pri:C.bdr}`,background:!showAll?C.pri:'#fff',color:!showAll?'#fff':C.mid,fontSize:8,cursor:'pointer',fontWeight:!showAll?700:400}}>{"งานที่เหมาะกับฉัน"}</button><button onClick={()=>setShowAll(true)} style={{flex:1,padding:'3px 6px',borderRadius:5,border:`1px solid ${showAll?C.pri:C.bdr}`,background:showAll?C.pri:'#fff',color:showAll?'#fff':C.mid,fontSize:8,cursor:'pointer',fontWeight:showAll?700:400}}>{"ทั้งหมด"}</button></div>}
       {jobs.map((j,i)=><Crd key={i} s={{opacity:j.ok?1:.5,borderLeft:j.isNew?'3px solid '+C.org:undefined}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:2}}>
           <div><div style={{fontSize:10,fontWeight:700,display:'flex',alignItems:'center',gap:4}}>{j.isNew&&<Tag ch={j.status==='assigned'?'✅ รับแล้ว':'🆕 ใหม่'} col={j.status==='assigned'?C.suc:C.org}/>}{j.type}</div><div style={{fontSize:9,color:C.mid}}>{j.hosp}{j.patient&&(' · 👤 '+j.patient)}</div>{j.jobId&&<div style={{fontSize:8,color:'#94A3B8'}}>{j.jobId}</div>}</div>
@@ -944,6 +952,7 @@ function CTJobBoard(){
         <div style={{fontSize:9,color:C.mid,marginBottom:3}}>{j.date+" · "}<Tag ch={j.tier} col={C.pri}/></div>
         {j.ok?(j.status==='assigned'?<div style={{fontSize:9,color:C.suc,fontWeight:700}}>{"✅ รับงานนี้แล้ว"}</div>:<Btn ch="รับงานนี้ →" col={C.suc} sm fn={()=>j.jobId&&handleAccept(j.jobId)}/>):<div style={{fontSize:9,color:C.dan}}>{"🔒 Tier ไม่ถึง"}</div>}
       </Crd>)}
+      {acceptedId&&(()=>{const _j=lsJobs.find(j=>j.jobId===acceptedId);return _j?<Crd s={{background:'#ECFDF5',border:'2px solid '+C.suc}}><div style={{fontWeight:700,color:C.suc,marginBottom:4}}>{"✅ รับงานแล้ว!"}</div><div style={{fontSize:9,color:C.mid}}>{"👤 "+(_j.patient||'-')+" · 🕐 "+_j.date}</div><div style={{fontSize:8,color:'#94A3B8',marginBottom:3}}>{_j.hosp}</div><div style={{background:'#1E3A8A',borderRadius:6,padding:'4px 8px',marginTop:4,textAlign:'center'}}><div style={{fontSize:7,color:'rgba(255,255,255,0.6)'}}>{"🔐 PIN"}</div><div style={{fontSize:20,fontWeight:900,letterSpacing:6,color:'#93C5FD'}}>{"7421"}</div></div>{goTo&&<Btn ch="→ ไปที่งานเลย" col={C.suc} s={{width:'100%',marginTop:4}} fn={()=>goTo(0)}/>}</Crd>:null;})()}
     </div>
   </div>;
 }
@@ -966,7 +975,7 @@ function CloseHearts(){
 }
 
 // Care Team Home pages (no SOS)
-function RHomeMain({openHam}){
+function RHomeMain({openHam,goTo}){
   const[todayJob,setTodayJob]=useState(null);
   const MOB={'independent':'เดินได้เอง','assisted':'ต้องช่วยพยุง','wheelchair':'วีลแชร์','bedridden':'ติดเตียง'};
   useEffect(()=>{const load=()=>{const j=getJobs().find(j=>j.status==='assigned');setTodayJob(j||null);};load();window.addEventListener(JOB_UPDATED_EVENT,load);return()=>window.removeEventListener(JOB_UPDATED_EVENT,load);},[]);
@@ -982,7 +991,7 @@ function RHomeMain({openHam}){
         <div style={{flex:1,background:'#E1F5EE',border:'1px solid #9FE1CB',borderRadius:8,padding:'6px',textAlign:'center'}}><div style={{fontSize:13,fontWeight:700,color:'#085041'}}>{"฿8,400"}</div><div style={{fontSize:8,color:C.suc}}>{"ถอนได้เลย"}</div><Btn ch="ถอน" col={C.suc} sm s={{marginTop:3,fontSize:9}}/></div>
         <div style={{flex:1,background:'#FAEEDA',border:'1px solid #FAC775',borderRadius:8,padding:'6px',textAlign:'center'}}><div style={{fontSize:13,fontWeight:700,color:'#633806'}}>{"฿1,500"}</div><div style={{fontSize:8,color:'#854F0B'}}>{"งานวันนี้"}</div></div>
       </div>
-      {todayJob?<Crd s={{background:'#EEEDFE',border:'1px solid #AFA9EC'}}><div style={{fontWeight:700,color:C.pri}}>{"⏰ งานวันนี้ "+(bd.schedule?.time||'09:00')}</div><div style={{fontSize:9,color:C.mid}}>{(bd.locations?.dropoff||'รพ.')+' · '+(bd.patient?.name||'-')+' · '+(MOB[bd.patient?.mobilityLevel]||'-')}</div><div style={{fontSize:8,color:'#94A3B8',marginTop:2}}>{todayJob.jobId}</div></Crd>:<Crd s={{background:'#EEEDFE',border:'1px solid #AFA9EC'}}><div style={{fontWeight:700,color:C.pri}}>{"⏰ งานวันนี้ 09:00"}</div><div style={{fontSize:9,color:C.mid}}>{"รพ.จุฬาฯ · คุณแม่มุก · วีลแชร์"}</div></Crd>}
+      {todayJob?<Crd s={{background:'#EEEDFE',border:'1px solid #AFA9EC'}}><div style={{fontWeight:700,color:C.pri}}>{"⏰ งานวันนี้ "+(bd.schedule?.time||'09:00')}</div><div style={{fontSize:9,color:C.mid}}>{(bd.locations?.dropoff||'รพ.')+' · '+(bd.patient?.name||'-')+' · '+(MOB[bd.patient?.mobilityLevel]||'-')}</div><div style={{fontSize:8,color:'#94A3B8',marginTop:2}}>{todayJob.jobId}</div>{goTo&&<Btn ch="→ เริ่มงานเลย" col={C.pri} sm s={{marginTop:4,width:'100%'}} fn={()=>goTo(1)}/>}</Crd>:<Crd s={{background:'#EEEDFE',border:'1px solid #AFA9EC'}}><div style={{fontWeight:700,color:C.pri}}>{"⏰ งานวันนี้ 09:00"}</div><div style={{fontSize:9,color:C.mid}}>{"รพ.จุฬาฯ · คุณแม่มุก · วีลแชร์"}</div></Crd>}
       <ST ic="📅" ch="งานสัปดาห์นี้"/>
       <Crd><div style={{fontSize:9,lineHeight:1.9,color:C.mid}}>{"พ 15 พ.ค. 09:00 — แม่มุก · ฿1,500\n14:00 — ยายวิมล · ฿1,200"}</div></Crd>
     </div>
@@ -1021,7 +1030,7 @@ function RJobToday(){
   </div>;
 }
 
-function KHomeMain({openHam}){
+function KHomeMain({openHam,goTo}){
   const[todayJob,setTodayJob]=useState(null);
   const MOB={'wheelchair':'วีลแชร์ 🚐','bedridden':'เปล 🚑','assisted':'ต้องพยุง','independent':'เดินได้เอง'};
   useEffect(()=>{const load=()=>{const j=getJobs().find(j=>j.status==='assigned');setTodayJob(j||null);};load();window.addEventListener(JOB_UPDATED_EVENT,load);return()=>window.removeEventListener(JOB_UPDATED_EVENT,load);},[]);
@@ -1033,7 +1042,7 @@ function KHomeMain({openHam}){
       <span style={{color:'white',fontSize:11}}>{"🔔"}</span>
     </div>
     <div style={{padding:'8px 9px'}}>
-      {todayJob?<Crd s={{background:'#EEEDFE',border:'1px solid #AFA9EC'}}><div style={{fontWeight:700,color:C.pri}}>{"⏰ "+(bd.schedule?.time||'08:00')+' · '+(bd.patient?.name||'-')}</div><div style={{fontSize:9,color:C.mid}}>{(bd.locations?.pickup||'-')+' → '+(bd.locations?.dropoff||'-')+' · '+(MOB[bd.patient?.mobilityLevel]||'-')}</div><div style={{fontSize:8,color:'#94A3B8',marginTop:2}}>{todayJob.jobId}</div></Crd>:<Crd s={{background:'#EEEDFE',border:'1px solid #AFA9EC'}}><div style={{fontWeight:700,color:C.pri}}>{"⏰ 08:00 · คุณแม่มุก"}</div><div style={{fontSize:9,color:C.mid}}>{"ลาดพร้าว ซ.12 → รพ.จุฬาฯ · วีลแชร์ 🚐"}</div></Crd>}
+      {todayJob?<Crd s={{background:'#EEEDFE',border:'1px solid #AFA9EC'}}><div style={{fontWeight:700,color:C.pri}}>{"⏰ "+(bd.schedule?.time||'08:00')+' · '+(bd.patient?.name||'-')}</div><div style={{fontSize:9,color:C.mid}}>{(bd.locations?.pickup||'-')+' → '+(bd.locations?.dropoff||'-')+' · '+(MOB[bd.patient?.mobilityLevel]||'-')}</div><div style={{fontSize:8,color:'#94A3B8',marginTop:2}}>{todayJob.jobId}</div>{goTo&&<Btn ch="→ เริ่มงานเลย" col={C.pri} sm s={{marginTop:4,width:'100%'}} fn={()=>goTo(1)}/>}</Crd>:<Crd s={{background:'#EEEDFE',border:'1px solid #AFA9EC'}}><div style={{fontWeight:700,color:C.pri}}>{"⏰ 08:00 · คุณแม่มุก"}</div><div style={{fontSize:9,color:C.mid}}>{"ลาดพร้าว ซ.12 → รพ.จุฬาฯ · วีลแชร์ 🚐"}</div></Crd>}
       <div style={{display:'flex',gap:4,marginTop:4}}>
         <div style={{flex:1,background:'#E1F5EE',border:'1px solid #9FE1CB',borderRadius:8,padding:'6px',textAlign:'center'}}><div style={{fontSize:13,fontWeight:700,color:'#085041'}}>{"฿4,200"}</div><div style={{fontSize:8,color:C.suc}}>{"ถอนได้เลย"}</div></div>
         <div style={{flex:1,background:'#FAEEDA',border:'1px solid #FAC775',borderRadius:8,padding:'6px',textAlign:'center'}}><div style={{fontSize:13,fontWeight:700,color:'#633806'}}>{"฿600"}</div><div style={{fontSize:8,color:'#854F0B'}}>{"งานวันนี้"}</div></div>
@@ -1056,7 +1065,10 @@ function KBriefPIN(){
   </div>;
 }
 
-function CDHomeMain({openHam}){
+function CDHomeMain({openHam,goTo}){
+  const[todayJob,setTodayJob]=useState(null);
+  useEffect(()=>{const load=()=>{const j=getJobs().find(j=>j.status==='assigned');setTodayJob(j||null);};load();window.addEventListener(JOB_UPDATED_EVENT,load);return()=>window.removeEventListener(JOB_UPDATED_EVENT,load);},[]);
+  const bd=todayJob?.bookingData||{};
   return <div style={{background:C.bg}}>
     <div style={{background:C.drk,padding:'8px 11px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
       <button onClick={openHam} style={{background:'none',border:'none',color:'white',fontSize:15,cursor:'pointer',padding:0}}>{"☰"}</button>
@@ -1064,7 +1076,7 @@ function CDHomeMain({openHam}){
       <span style={{color:'white',fontSize:11}}>{"🔔"}</span>
     </div>
     <div style={{padding:'8px 9px'}}>
-      <Crd s={{background:'#EEEDFE',border:'1px solid #AFA9EC'}}><div style={{fontWeight:700,color:C.pri}}>{"💊 คิว A-042 · คุณแม่มุก"}</div><div style={{fontSize:9,color:C.mid}}>{"รพ.จุฬาฯ อายุรกรรม ชั้น 3"}</div></Crd>
+      <Crd s={{background:'#EEEDFE',border:'1px solid #AFA9EC'}}><div style={{fontWeight:700,color:C.pri}}>{todayJob?('💊 '+(bd.patient?.name||'คุณแม่มุก')):'💊 คิว A-042 · คุณแม่มุก'}</div><div style={{fontSize:9,color:C.mid}}>{todayJob?(bd.locations?.dropoff||'รพ.จุฬาฯ อายุรกรรม ชั้น 3'):'รพ.จุฬาฯ อายุรกรรม ชั้น 3'}</div>{todayJob&&<div style={{fontSize:8,color:'#94A3B8',marginTop:2}}>{todayJob.jobId}</div>}{todayJob&&goTo&&<Btn ch="→ ไปที่งาน" col={C.pri} sm s={{marginTop:4,width:'100%'}} fn={()=>goTo(1)}/>}</Crd>
       <div style={{display:'flex',gap:4,marginTop:4}}>
         <div style={{flex:1,background:'#E1F5EE',border:'1px solid #9FE1CB',borderRadius:8,padding:'6px',textAlign:'center'}}><div style={{fontSize:13,fontWeight:700,color:'#085041'}}>{"฿2,100"}</div><div style={{fontSize:8,color:C.suc}}>{"ถอนได้เลย"}</div></div>
         <div style={{flex:1,background:'#FAEEDA',border:'1px solid #FAC775',borderRadius:8,padding:'6px',textAlign:'center'}}><div style={{fontSize:13,fontWeight:700,color:'#633806'}}>{"฿400"}</div><div style={{fontSize:8,color:'#854F0B'}}>{"งานวันนี้"}</div></div>
@@ -1135,7 +1147,7 @@ const ctHam=[{ic:'📋',label:'ประวัติธุรกรรม',hamPa
 
 // ── OPS DASHBOARD (V15V7 style with tabs - instruction 17) ────────
 function OpsWebDash(){
-  const[tab,st]=useState('daily');const[oF,sO]=useState(5);const[wF,sW]=useState(25);const[ai,sa]=useState(false);
+  const[tab,st]=useState('daily');const[oF,sO]=useState(5);const[wF,sW]=useState(25);const[ai,sa]=useState(false);const[pickJobId,setPick]=useState(null);
   const[lsBooks,setLsBooks]=useState([]);
   useEffect(()=>{const load=()=>{try{setLsBooks(getJobs().filter(b=>b.status!=='cancelled'));}catch{setLsBooks([]);}};load();window.addEventListener(JOB_UPDATED_EVENT,load);return()=>window.removeEventListener(JOB_UPDATED_EVENT,load);},[]);
   const actv=lsBooks.filter(b=>b.status==='active'||b.status==='assigned').length;
@@ -1167,7 +1179,7 @@ function OpsWebDash(){
       {tab==='lb'&&<div><ST ic="🏆" ch="Leaderboard เดือนนี้"/><table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}><thead><tr style={{background:'#EFF6FF'}}>{['#','ชื่อ','Tier','งาน','⭐','❤️','Score'].map((h,i)=><th key={i} style={{padding:'6px 8px',textAlign:'left',fontWeight:700,borderBottom:'2px solid '+C.bdr}}>{h}</th>)}</tr></thead><tbody>{[{r:'🥇',n:'คุณดูแล B',t:'Admin',j:45,rt:4.9,h:38,s:982},{r:'🥈',n:'คุณรู้ใจ A',t:'RN',j:38,rt:4.8,h:32,s:945},{r:'🥉',n:'คุณขับดี C',t:'Driver',j:52,rt:4.7,h:29,s:921}].map((r,i)=><tr key={i} style={{borderBottom:'1px solid '+C.bdr}}><td style={{padding:'6px 8px'}}>{r.r}</td><td style={{padding:'6px 8px',fontWeight:700}}>{r.n}</td><td style={{padding:'6px 8px'}}><Tag ch={r.t} col={C.pri}/></td><td style={{padding:'6px 8px'}}>{r.j}</td><td style={{padding:'6px 8px',color:C.wrn}}>{"⭐"+r.rt}</td><td style={{padding:'6px 8px',color:C.dan}}>{"❤️"+r.h}</td><td style={{padding:'6px 8px',fontWeight:800,color:C.pri}}>{r.s}</td></tr>)}</tbody></table></div>}
       {tab==='backlog'&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
         <div><ST ic="📋" ch={"Unmatched ("+(lsBooks.length+2)+")"}/>
-          {lsBooks.map((b,i)=>{const bd=b.bookingData||{};const tr={'independent':'CG','assisted':'CG','wheelchair':'PN','bedridden':'RN'};const isAssigned=b.status==='assigned';return<Crd key={'ls'+i} s={{borderLeft:'3px solid '+(isAssigned?C.suc:C.org)}}><div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{fontWeight:700,fontSize:10,color:isAssigned?C.suc:C.org}}>{isAssigned?'✅':'🆕'} {b.jobId}</span><Tag ch="฿1,500" col={isAssigned?C.suc:C.dan}/></div><div style={{fontSize:9,color:C.mid,marginBottom:2}}>{bd.patient?.name||'-'}{" · "}{tr[bd.patient?.mobilityLevel]||'CG'}</div><div style={{fontSize:9,color:C.mid,marginBottom:3}}>{[bd.schedule?.date,bd.schedule?.time].filter(Boolean).join(' ')||'-'}</div>{isAssigned?<div style={{fontSize:9,color:C.suc,fontWeight:700}}>{"✅ จับคู่แล้ว · "+b.assignedTo}</div>:<Btn ch="จับคู่" col={C.pri} sm fn={()=>assignJob(b.jobId,'Ops')}/>}</Crd>;})}
+          {lsBooks.map((b,i)=>{const bd=b.bookingData||{};const tr={'independent':'CG','assisted':'CG','wheelchair':'PN','bedridden':'RN'};const isAssigned=b.status==='assigned';return<Crd key={'ls'+i} s={{borderLeft:'3px solid '+(isAssigned?C.suc:C.org)}}><div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{fontWeight:700,fontSize:10,color:isAssigned?C.suc:C.org}}>{isAssigned?'✅':'🆕'} {b.jobId}</span><Tag ch="฿1,500" col={isAssigned?C.suc:C.dan}/></div><div style={{fontSize:9,color:C.mid,marginBottom:2}}>{bd.patient?.name||'-'}{" · "}{tr[bd.patient?.mobilityLevel]||'CG'}</div><div style={{fontSize:9,color:C.mid,marginBottom:3}}>{[bd.schedule?.date,bd.schedule?.time].filter(Boolean).join(' ')||'-'}</div>{isAssigned?<div style={{fontSize:9,color:C.suc,fontWeight:700}}>{"✅ จับคู่แล้ว · "+b.assignedTo}</div>:pickJobId===b.jobId?<div style={{display:'flex',gap:3,flexWrap:'wrap',marginTop:2}}>{['คุณทิพย์','คุณสมชาย','คุณนิภา'].map(n=><button key={n} onClick={()=>{assignJob(b.jobId,n);setPick(null);}} style={{padding:'2px 7px',borderRadius:4,background:C.suc,color:'#fff',border:'none',fontSize:8,cursor:'pointer',fontWeight:700}}>{n}</button>)}<button onClick={()=>setPick(null)} style={{padding:'2px 6px',borderRadius:4,background:'#F1F5F9',border:'1px solid '+C.bdr,fontSize:8,cursor:'pointer'}}>{"✕"}</button></div>:<Btn ch="จับคู่" col={C.pri} sm fn={()=>setPick(b.jobId)}/>}</Crd>;})}
           {[{d:'19 มี.ค.',s:'RN+Driver',z:'ลาดพร้าว',v:'฿850'},{d:'20 มี.ค.',s:'CG+Driver',z:'สุขุมวิท',v:'฿650'}].map((b,i)=><Crd key={i}><div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{fontWeight:700,fontSize:10}}>{b.d+" · "+b.s}</span><Tag ch={b.v} col={C.dan}/></div><div style={{fontSize:9,color:C.mid,marginBottom:3}}>{b.z}</div><Btn ch="จับคู่" col={C.pri} sm/></Crd>)}
         </div>
         <div><ST ic="⏱️" ch="Pending"/>{[{p:'🔴',t:'โทรร้องเรียน',tm:'15 นาที',a:'โทร',c:C.dan},{p:'🟡',t:'ตรวจ KYC 3 ใบ',tm:'วันนี้',a:'ตรวจ',c:C.wrn},{p:'🟢',t:'Tier Upgrade',tm:'สัปดาห์นี้',a:'อนุมัติ',c:C.suc}].map((a,i)=><div key={i} style={{display:'flex',gap:7,padding:'5px 0',borderBottom:'1px solid '+C.bdr,alignItems:'center'}}><span>{a.p}</span><div style={{flex:1}}><div style={{fontSize:10,fontWeight:700}}>{a.t}</div><div style={{fontSize:9,color:C.mid}}>{"⏰ "+a.tm}</div></div><Btn ch={a.a} col={a.c} sm/></div>)}</div>
@@ -1301,9 +1313,9 @@ export default function App(){
   ];
   const getDNav=()=>{if(sc.scen==='new')return dNewNav;if(sc.scen==='old_appt')return dOldApptNav;return dOldNoApptNav;};
   const gNav=[{icon:'🏠',label:'หน้าหลัก',pages:[{label:'หน้าหลัก',content:()=><GHome/>}]},{icon:'📅',label:'นัดหมอ',pages:[{label:'สัปดาห์หน้า',content:()=><GUpcoming/>}]},{icon:'🔑',label:'PIN+Status',pages:[{label:'PIN+Timeline',content:()=><GPINTimeline/>}]},{icon:'🌙',label:'หลังกลับ',pages:[{label:'ให้คะแนน',content:()=><GPraise/>},{label:'กินยา',content:()=><GMed/>}]},{icon:'🤖',label:'น้องแคร์',pages:[{label:'น้องแคร์',content:()=><GNCare/>}]}];
-  const rNav=[{icon:'🏠',label:'หน้าหลัก',pages:[{label:'หน้าหลัก',content:({openHam})=><RHomeMain openHam={openHam}/>}]},{icon:'🏥',label:'งานวันนี้',pages:[{label:'Brief+Steps',content:()=><RJobToday/>},{label:'ปิดงาน',content:()=><CloseHearts/>}]},{icon:'📋',label:'รับงาน',pages:[{label:'รับงาน',content:()=><CTJobBoard/>}]},{icon:'🤖',label:'น้องแคร์',pages:[{label:'Contact',content:()=><CTOpContact/>}]}];
-  const kNav=[{icon:'🏠',label:'หน้าหลัก',pages:[{label:'หน้าหลัก',content:({openHam})=><KHomeMain openHam={openHam}/>}]},{icon:'🔑',label:'Brief+PIN',pages:[{label:'Brief+PIN',content:()=><KBriefPIN/>},{label:'ปิดงาน',content:()=><CloseHearts/>}]},{icon:'📋',label:'รับงาน',pages:[{label:'รับงาน',content:()=><CTJobBoard/>}]},{icon:'🤖',label:'น้องแคร์',pages:[{label:'Contact',content:()=><CTOpContact/>}]}];
-  const cNav=[{icon:'🏠',label:'หน้าหลัก',pages:[{label:'หน้าหลัก',content:({openHam})=><CDHomeMain openHam={openHam}/>}]},{icon:'💊',label:'ตรวจยา',pages:[{label:'OCR',content:()=><CDashOCR/>},{label:'ปิดงาน',content:()=><CloseHearts/>}]},{icon:'📋',label:'รับงาน',pages:[{label:'รับงาน',content:()=><CTJobBoard/>}]},{icon:'🤖',label:'น้องแคร์',pages:[{label:'Contact',content:()=><CTOpContact/>}]}];
+  const rNav=[{icon:'🏠',label:'หน้าหลัก',pages:[{label:'หน้าหลัก',content:({openHam,goTo})=><RHomeMain openHam={openHam} goTo={goTo}/>}]},{icon:'🏥',label:'งานวันนี้',pages:[{label:'Brief+Steps',content:()=><RJobToday/>},{label:'ปิดงาน',content:()=><CloseHearts/>}]},{icon:'📋',label:'รับงาน',pages:[{label:'รับงาน',content:({goTo})=><CTJobBoard goTo={goTo} myTier="PN"/>}]},{icon:'🤖',label:'น้องแคร์',pages:[{label:'Contact',content:()=><CTOpContact/>}]}];
+  const kNav=[{icon:'🏠',label:'หน้าหลัก',pages:[{label:'หน้าหลัก',content:({openHam,goTo})=><KHomeMain openHam={openHam} goTo={goTo}/>}]},{icon:'🔑',label:'Brief+PIN',pages:[{label:'Brief+PIN',content:()=><KBriefPIN/>},{label:'ปิดงาน',content:()=><CloseHearts/>}]},{icon:'📋',label:'รับงาน',pages:[{label:'รับงาน',content:({goTo})=><CTJobBoard goTo={goTo} myTier="Driver"/>}]},{icon:'🤖',label:'น้องแคร์',pages:[{label:'Contact',content:()=><CTOpContact/>}]}];
+  const cNav=[{icon:'🏠',label:'หน้าหลัก',pages:[{label:'หน้าหลัก',content:({openHam,goTo})=><CDHomeMain openHam={openHam} goTo={goTo}/>}]},{icon:'💊',label:'ตรวจยา',pages:[{label:'OCR',content:()=><CDashOCR/>},{label:'ปิดงาน',content:()=><CloseHearts/>}]},{icon:'📋',label:'รับงาน',pages:[{label:'รับงาน',content:({goTo})=><CTJobBoard goTo={goTo} myTier="CG"/>}]},{icon:'🤖',label:'น้องแคร์',pages:[{label:'Contact',content:()=><CTOpContact/>}]}];
   const opsMobNav=[{icon:'📊',label:'Overview',pages:[{label:'Ops',content:()=><OpsMobView/>}]}];
 
   return(
