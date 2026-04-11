@@ -18,13 +18,24 @@ export interface BookingData {
   patient?: { name?: string; mobilityLevel?: string };
 }
 
+export interface Checkpoint {
+  label: string;
+  time: string;
+  photo?: string;   // base64 data URL
+  note?: string;
+  vitals?: { bp?: string; spo2?: string };
+}
+
 export interface StoredJob {
   jobId: string;
   bookingData: BookingData;
   createdAt: string;
   status?: JobStatus;
   assignedTo?: string;
-  checkpoints?: Array<{ label: string; time: string }>;
+  checkpoints?: Checkpoint[];
+  voiceNoteUrl?: string;
+  voiceTranscript?: string;
+  voiceSentiment?: { score: number; flags: string[]; summary: string };
 }
 
 // ── reads ──────────────────────────────────────────────────────────────────
@@ -89,8 +100,33 @@ export function assignJob(jobId: string, assignedTo: string): void {
 }
 
 export function addCheckpoint(jobId: string, label: string): void {
+  addCheckpointWithData(jobId, label);
+}
+
+export function addCheckpointWithData(
+  jobId: string,
+  label: string,
+  extra?: Partial<Omit<Checkpoint, 'label' | 'time'>>,
+): void {
   const job = getJob(jobId);
   if (!job) return;
-  const checkpoints = [...(job.checkpoints ?? []), { label, time: new Date().toISOString() }];
+  const cp: Checkpoint = { label, time: new Date().toISOString(), ...extra };
+  // If a checkpoint with same label exists, merge extra data into it
+  const existing = job.checkpoints ?? [];
+  const idx = existing.findIndex(c => c.label === label);
+  const checkpoints = idx >= 0
+    ? existing.map((c, i) => i === idx ? { ...c, ...extra } : c)
+    : [...existing, cp];
   updateJob(jobId, { checkpoints, status: 'active' });
+}
+
+export function updateVoiceData(
+  jobId: string,
+  data: { url?: string; transcript?: string; sentiment?: StoredJob['voiceSentiment'] },
+): void {
+  updateJob(jobId, {
+    ...(data.url !== undefined && { voiceNoteUrl: data.url }),
+    ...(data.transcript !== undefined && { voiceTranscript: data.transcript }),
+    ...(data.sentiment !== undefined && { voiceSentiment: data.sentiment }),
+  });
 }

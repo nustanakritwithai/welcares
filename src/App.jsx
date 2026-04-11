@@ -1,5 +1,7 @@
-import{useState,useEffect,createContext,useContext}from"react";
-import{getJobs,assignJob,updateJob,addCheckpoint,getActiveJob,getRunningJobs,getJobCounts,JOB_UPDATED_EVENT}from'./lib/jobStore';
+import{useState,useEffect,useRef,createContext,useContext}from"react";
+import{getJobs,assignJob,updateJob,addCheckpoint,addCheckpointWithData,updateVoiceData,getActiveJob,getRunningJobs,getJobCounts,JOB_UPDATED_EVENT}from'./lib/jobStore';
+import{createRecorder,transcribeAudio,analyzeTranscript,scanPrescription}from'./agents/voice/voicePipeline';
+const getApiKey=()=>{try{return localStorage.getItem('welcares_api_key')||'';}catch{return'';}}
 import{IntakeAgentDemo}from'./agents/intake/demo/IntakeAgentDemo';
 import{IntakeChatDemo}from'./agents/intake-chat/demo/IntakeChatDemo';
 import{ChatBookingAgentDemo}from'./agents/__demo__/ChatBookingAgentDemo';
@@ -724,7 +726,8 @@ function DLiveView(){
   const[job,setJob]=useState(()=>getActiveJob());
   const DLSTEPS=[{l:'รับจากบ้าน',cpKey:'รับจากบ้าน',ic:'🏠'},{l:'ถึงโรงพยาบาล',cpKey:'ถึง รพ.',ic:'🏥'},{l:'กำลังรอพบแพทย์',cpKey:'รอพบแพทย์',ic:'⏳'},{l:'รับยา',cpKey:'รอรับยา',ic:'💊'},{l:'กลับบ้าน',cpKey:'ส่งกลับบ้าน',ic:'🏠'}];
   useEffect(()=>{const load=()=>setJob(getActiveJob());load();window.addEventListener(JOB_UPDATED_EVENT,load);return()=>window.removeEventListener(JOB_UPDATED_EVENT,load);},[]);
-  const cpMap={};(job?.checkpoints||[]).forEach(cp=>{DLSTEPS.forEach((s,i)=>{if(cp.label===s.cpKey||cp.label.includes(s.l.slice(0,4)))cpMap[i]=cp.time;});});
+  const cpMap={};const cpPhotoMap={};
+  (job?.checkpoints||[]).forEach(cp=>{DLSTEPS.forEach((s,i)=>{if(cp.label===s.cpKey||cp.label.includes(s.l.slice(0,4))){cpMap[i]=cp.time;if(cp.photo)cpPhotoMap[i]=cp.photo;}});});
   const fmtT=iso=>{try{const d=new Date(iso);return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0')+' น.';}catch{return'';}};
   const activeIdx=DLSTEPS.findIndex((_,i)=>!cpMap[i]);
   const bd=job?.bookingData||{};
@@ -736,12 +739,14 @@ function DLiveView(){
     {steps.map((s,i)=><div key={i} style={{display:'flex',gap:9,marginBottom:3,opacity:s.d==='future'?.35:1}}>
       <div style={{display:'flex',flexDirection:'column',alignItems:'center'}}>
         <div style={{width:30,height:30,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,border:`2px solid ${s.d==='done'?C.suc:s.d==='active'?C.pri:C.bdr}`,background:s.d==='done'?'#ECFDF5':s.d==='active'?'#EEEDFE':'#fff'}}>{s.ic}</div>
-        {i<steps.length-1&&<div style={{width:2,height:s.img?48:18,background:s.d==='done'?C.suc:C.bdr}}/>}
+        {i<steps.length-1&&<div style={{width:2,height:cpPhotoMap[i]?52:s.img?52:18,background:s.d==='done'?C.suc:C.bdr}}/>}
       </div>
       <div style={{paddingTop:5,flex:1}}>
         <div style={{fontSize:11,fontWeight:s.d==='active'?700:500,color:s.d==='active'?C.pri:C.txt}}>{s.l}</div>
         <div style={{fontSize:9,color:C.mid}}>{s.s}</div>
-        {s.img&&<div style={{background:'#F1F5F9',borderRadius:8,height:38,display:'flex',alignItems:'center',justifyContent:'center',marginTop:4,border:'1px solid '+C.bdr}}><span style={{fontSize:9,color:C.mid}}>{"📷 รูปคุณยาย 😊"}</span></div>}
+        {s.img&&(cpPhotoMap[i]
+          ?<img src={cpPhotoMap[i]} style={{width:'100%',height:52,objectFit:'cover',borderRadius:7,marginTop:4,border:'1px solid '+C.bdr}}/>
+          :<div style={{background:'#F1F5F9',borderRadius:8,height:38,display:'flex',alignItems:'center',justifyContent:'center',marginTop:4,border:'1px solid '+C.bdr}}><span style={{fontSize:9,color:C.mid}}>{"📷 รูปจะปรากฏหลังถ่าย"}</span></div>)}
       </div>
     </div>)}
     <Crd s={{background:'#E1F5EE',border:'1px solid #1D9E75',marginTop:6}}><div style={{fontWeight:700,color:'#085041',marginBottom:2}}>{"💡 จองนัดครั้งต่อไป 15 ก.ค.?"}</div><div style={{display:'flex',gap:4}}><Btn ch="จองเลย →" col={C.suc} sm/><Btn ch="ภายหลัง" col={C.mid} out sm/></div></Crd>
@@ -751,28 +756,36 @@ function DLiveView(){
 // Report with Note tab (instruction 10)
 function DReport(){
   const[rt,srt]=useState('emotion');const[noteStatus,setNS]=useState('pending');
+  const[job,setJob]=useState(()=>getActiveJob()||getJobs().find(j=>j.status==='completed'));
+  useEffect(()=>{const load=()=>setJob(getActiveJob()||getJobs().find(j=>j.status==='completed'));load();window.addEventListener(JOB_UPDATED_EVENT,load);return()=>window.removeEventListener(JOB_UPDATED_EVENT,load);},[]);
+  const scoreCol=s=>s>=4?C.suc:s>=3?C.wrn:C.dan;
+  const scoreEmoji=s=>s>=4?'😊 ดี':'s>=3'?'😐 ปกติ':'😟 ต้องติดตาม';
   return <div style={{padding:'8px 9px',background:C.bg}}>
     <div style={{display:'flex',gap:2,marginBottom:7,overflowX:'auto'}}>
       {[{v:'emotion',l:'😊'},{v:'doctor',l:'👨‍⚕️'},{v:'meds',l:'💊'},{v:'note',l:'📝 Note'}].map(r=><button key={r.v} onClick={()=>srt(r.v)} style={{flex:1,padding:'4px 2px',borderRadius:6,border:`1px solid ${rt===r.v?C.pri:C.bdr}`,background:rt===r.v?'#EEEDFE':'#fff',fontSize:8,color:rt===r.v?C.pri:C.mid,cursor:'pointer',fontWeight:rt===r.v?700:400,whiteSpace:'nowrap',minWidth:40}}>{r.l}</button>)}
     </div>
-    {rt==='emotion'&&<Crd s={{background:'#FFF3CD'}}><div style={{fontWeight:700,marginBottom:2}}>{"😊 AI Sentiment"}</div><div style={{display:'flex',gap:8,marginTop:4}}>{[{l:'บรรยากาศ',v:'😊 ดีมาก',c:C.suc},{l:'ระดับ',v:'4.8/5',c:C.suc},{l:'คำพูดดี',v:'87%',c:C.pri}].map((k,i)=><div key={i} style={{flex:1,textAlign:'center'}}><div style={{fontSize:9,color:C.mid}}>{k.l}</div><div style={{fontSize:12,fontWeight:800,color:k.c}}>{k.v}</div></div>)}</div></Crd>}
+    {rt==='emotion'&&<Crd s={{background:'#FFF3CD'}}><div style={{fontWeight:700,marginBottom:2}}>{"😊 AI Sentiment"}</div>
+      {job?.voiceSentiment?<div style={{display:'flex',gap:8,marginTop:4}}>
+        <div style={{flex:1,textAlign:'center'}}><div style={{fontSize:9,color:C.mid}}>{"คะแนน"}</div><div style={{fontSize:14,fontWeight:800,color:scoreCol(job.voiceSentiment.score)}}>{job.voiceSentiment.score+"/5"}</div></div>
+        <div style={{flex:2,fontSize:9,color:C.txt,lineHeight:1.6}}>{job.voiceSentiment.summary}</div>
+      </div>:<div style={{display:'flex',gap:8,marginTop:4}}>{[{l:'บรรยากาศ',v:'😊 ดีมาก',c:C.suc},{l:'ระดับ',v:'4.8/5',c:C.suc},{l:'คำพูดดี',v:'87%',c:C.pri}].map((k,i)=><div key={i} style={{flex:1,textAlign:'center'}}><div style={{fontSize:9,color:C.mid}}>{k.l}</div><div style={{fontSize:12,fontWeight:800,color:k.c}}>{k.v}</div></div>)}</div>}
+      {job?.voiceSentiment?.flags?.length>0&&<div style={{marginTop:4}}>{job.voiceSentiment.flags.map((f,i)=><Tag key={i} ch={"⚠️ "+f} col={C.dan}/>)}</div>}
+    </Crd>}
     {rt==='doctor'&&<Crd><ST ic="👨‍⚕️" ch="Doctor Summary"/><div style={{fontSize:10,lineHeight:1.8}}>{"ความดันลด 145/90→128/82 ✅\nลด AMLODIPINE 10mg→5mg\nนัดติดตาม: 15 ก.ค. 68"}</div></Crd>}
     {rt==='meds'&&<Crd><ST ic="💊" ch="Medication"/><div style={{height:5,background:'#E2E8F0',borderRadius:3,marginBottom:3}}><div style={{height:5,width:'91%',background:C.suc,borderRadius:3}}/></div><div style={{fontSize:9,color:C.suc,textAlign:'right'}}>{"91% compliance ✅"}</div></Crd>}
     {rt==='note'&&<>
       <Crd s={{background:'#F8FAFC'}}>
         <ST ic="🎙" ch="บันทึกเสียง คุณทิพย์ (PN)"/>
-        <div style={{background:'#EFF6FF',borderRadius:8,height:38,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:5}}>
-          <span style={{fontSize:9,color:C.pri}}>{"🎵 Voice recording · 2:45 min"}</span>
-        </div>
+        {job?.voiceNoteUrl
+          ?<audio controls src={job.voiceNoteUrl} style={{width:'100%',height:32,marginBottom:4}}/>
+          :<div style={{background:'#EFF6FF',borderRadius:8,height:38,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:5}}><span style={{fontSize:9,color:C.pri}}>{"🎵 จะปรากฏหลังปิดงาน"}</span></div>}
       </Crd>
       <Crd>
         <ST ic="🤖" ch="AI Transcript + Tone Analysis"/>
-        <div style={{fontSize:9,color:C.txt,lineHeight:1.8,background:'#F8FAFC',borderRadius:6,padding:'6px 8px',marginBottom:6}}>{"คุณยายอารมณ์ดีตลอด พูดคุยเรื่องหลาน ๒ คน ความดันลดลงจาก ๑๔๕ เป็น ๑๒๘ หมอแนะนำลดยา และนัดติดตาม ๑๕ ก.ค. คุณยายรับทราบและยิ้มตลอด"}</div>
-        <div style={{display:'flex',gap:3}}>
-          {[{l:'โทนดี 😊',c:C.suc},{l:'Positive 87%',c:C.pri},{l:'ไม่มีความเสี่ยง',c:C.suc}].map((k,i)=>(
-            <div key={i} style={{flex:1,textAlign:'center',background:k.c+'12',borderRadius:6,padding:'3px 0',fontSize:7,color:k.c,fontWeight:700}}>{k.l}</div>
-          ))}
-        </div>
+        <div style={{fontSize:9,color:C.txt,lineHeight:1.8,background:'#F8FAFC',borderRadius:6,padding:'6px 8px',marginBottom:6}}>{job?.voiceTranscript||"คุณยายอารมณ์ดีตลอด พูดคุยเรื่องหลาน ๒ คน ความดันลดลงจาก ๑๔๕ เป็น ๑๒๘ หมอแนะนำลดยา และนัดติดตาม ๑๕ ก.ค. คุณยายรับทราบและยิ้มตลอด"}</div>
+        {job?.voiceSentiment
+          ?<div style={{display:'flex',gap:3}}><div style={{flex:1,textAlign:'center',background:scoreCol(job.voiceSentiment.score)+'12',borderRadius:6,padding:'3px 0',fontSize:7,color:scoreCol(job.voiceSentiment.score),fontWeight:700}}>{scoreEmoji(job.voiceSentiment.score)}</div><div style={{flex:1,textAlign:'center',background:C.pri+'12',borderRadius:6,padding:'3px 0',fontSize:7,color:C.pri,fontWeight:700}}>{"คะแนน "+job.voiceSentiment.score+"/5"}</div><div style={{flex:1,textAlign:'center',background:(job.voiceSentiment.flags.length?C.dan:C.suc)+'12',borderRadius:6,padding:'3px 0',fontSize:7,color:job.voiceSentiment.flags.length?C.dan:C.suc,fontWeight:700}}>{job.voiceSentiment.flags.length?'⚠️ '+job.voiceSentiment.flags.length+' flag':'✅ ไม่มีความเสี่ยง'}</div></div>
+          :<div style={{display:'flex',gap:3}}>{[{l:'โทนดี 😊',c:C.suc},{l:'Positive 87%',c:C.pri},{l:'ไม่มีความเสี่ยง',c:C.suc}].map((k,i)=><div key={i} style={{flex:1,textAlign:'center',background:k.c+'12',borderRadius:6,padding:'3px 0',fontSize:7,color:k.c,fontWeight:700}}>{k.l}</div>)}</div>}
       </Crd>
       {noteStatus==='pending'&&<Crd s={{background:'#FFFBEB',border:'1px solid #F59E0B'}}>
         <div style={{fontSize:9,fontWeight:700,color:'#92400E',marginBottom:2}}>{"⏳ รอ Ops อนุมัติ (ช่วงแรก)"}</div>
@@ -853,6 +866,7 @@ function GPINTimeline(){
   // Also map standard care-team checkpoint labels to grandma labels
   const cpStd={'รับจากบ้าน':0,'ถึง รพ.':1,'รอพบแพทย์':2,'รอรับยา':3,'ส่งกลับบ้าน':4};
   (liveJob?.checkpoints||[]).forEach(cp=>{const idx=cpStd[cp.label];if(idx!==undefined)cpMap[idx]=cp.time;});
+  const vitals=(liveJob?.checkpoints||[]).find(c=>c.vitals)?.vitals;
   const fmtT=iso=>{try{const d=new Date(iso);return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0')+' น.';}catch{return'';}};
   const liveActiveIdx=GSTEPS.findIndex((_,i)=>!cpMap[i]);
   const ts=GSTEPS.map((s,i)=>{const done=cpMap[i]!==undefined;const active=i===liveActiveIdx;return{ic:done?'✅':active?'⏳':s.ic,d:done?'done':active?'active':'future',l:s.l,s:done?fmtT(cpMap[i]):active&&liveJob?.assignedTo?liveJob.assignedTo+' อยู่ด้วยค่ะ':''};});
@@ -865,6 +879,7 @@ function GPINTimeline(){
       <div style={{display:'flex',flexDirection:'column',alignItems:'center'}}><div style={{width:36,height:36,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:GF.base,border:`2px solid ${s.d==='done'?C.suc:s.d==='active'?C.pri:C.bdr}`,background:s.d==='done'?'#ECFDF5':s.d==='active'?'#EEEDFE':'#fff'}}>{s.ic}</div>{i<ts.length-1&&<div style={{width:2,height:14,background:s.d==='done'?C.suc:C.bdr}}/>}</div>
       <div style={{paddingTop:6}}><div style={{fontSize:GF.base,fontWeight:s.d==='active'?700:500,color:s.d==='active'?C.pri:C.txt}}>{s.l}</div><div style={{fontSize:GF.base-4,color:C.mid}}>{s.s}</div></div>
     </div>)}
+    {vitals&&<div style={{background:'#EFF6FF',borderRadius:10,padding:'8px 10px',border:'1px solid #BFDBFE',marginTop:4}}><div style={{fontSize:GF.base-2,color:'#1E3A8A',fontWeight:700,marginBottom:2}}>{"🩺 ข้อมูลสุขภาพวันนี้"}</div>{vitals.bp&&<div style={{fontSize:GF.base-2,color:C.txt}}>{"ความดัน: "+vitals.bp}</div>}{vitals.spo2&&<div style={{fontSize:GF.base-2,color:C.txt}}>{"SpO2: "+vitals.spo2+"%"}</div>}</div>}
   </div>;
 }
 function GPraise(){return <div style={{background:'#fff',padding:14,display:'flex',flexDirection:'column',gap:10}}><div style={{textAlign:'center'}}><div style={{fontSize:36,marginBottom:6}}>{"🏡"}</div><div style={{fontSize:GF.large,fontWeight:800}}>{"กลับถึงบ้านแล้วค่ะ"}</div><div style={{fontSize:GF.base,color:C.mid,marginTop:4}}>{"ชอบคุณทิพย์ไหมคะ?"}</div></div><div style={{display:'flex',gap:8,justifyContent:'center'}}>{[1,2,3,4,5].map(i=><span key={i} style={{fontSize:32,cursor:'pointer',color:i<=4?'#EF9F27':'#CBD5E1'}}>{i<=4?'★':'☆'}</span>)}</div><div style={{width:'100%',padding:16,borderRadius:14,background:'#FAECE7',border:'2px solid #D85A30',color:'#D85A30',fontSize:GF.large,fontWeight:700,textAlign:'center',cursor:'pointer'}}>{"❤️ กดค้างพูดบอกความรู้สึก"}</div></div>;}
@@ -958,12 +973,43 @@ function CTJobBoard({goTo,myTier}){
 }
 
 function CloseHearts(){
-  const[hearts,sh]=useState({s1:null,s2:null});const[rec,sr]=useState(false);const[closed,setClosed]=useState(false);
+  const[hearts,sh]=useState({s1:null,s2:null});const[closed,setClosed]=useState(false);
+  const[rec,setRec]=useState(false);const[processing,setProc]=useState(false);
+  const[voiceUrl,setVoiceUrl]=useState(null);const[transcript,setTranscript]=useState('');
+  const[sentiment,setSentiment]=useState(null);
+  const recRef=useRef(null);
   const toggle=(k,t)=>sh(h=>({...h,[k]:h[k]===t?null:t}));
   const handleClose=()=>{const j=getActiveJob();if(j)updateJob(j.jobId,{status:'completed'});setClosed(true);};
+  const startRec=async()=>{
+    try{recRef.current=await createRecorder();recRef.current.start();setRec(true);}
+    catch(e){console.error(e);alert('ไม่สามารถเข้าถึงไมโครโฟนได้ค่ะ กรุณาอนุญาตในเบราว์เซอร์');}
+  };
+  const stopRec=async()=>{
+    if(!recRef.current)return;setRec(false);setProc(true);
+    try{
+      const blob=await recRef.current.stop();
+      const url=URL.createObjectURL(blob);setVoiceUrl(url);
+      const j=getActiveJob();if(j)updateVoiceData(j.jobId,{url});
+      const k=getApiKey();
+      if(k){
+        const tx=await transcribeAudio(blob,k);
+        if(tx){setTranscript(tx);if(j)updateVoiceData(j.jobId,{url,transcript:tx});}
+        const s=await analyzeTranscript(tx||'',k);
+        setSentiment(s);if(j)updateVoiceData(j.jobId,{url,transcript:tx,sentiment:s});
+      }
+    }catch(e){console.error(e);}finally{setProc(false);}
+  };
+  const scoreCol=s=>s>=4?C.suc:s>=3?C.wrn:C.dan;
   return <div style={{padding:'8px 9px',background:C.bg}}>
     <Crd s={{background:'#ECFDF5',border:'1px solid #6EE7B7',textAlign:'center'}}><div style={{fontSize:16}}>{"✅"}</div><div style={{fontWeight:700,color:C.suc}}>{"ส่งคุณยายถึงบ้านแล้ว"}</div></Crd>
-    <Crd><ST ic="🎙" ch="อัดเสียงสรุปวันนี้"/><Btn ch={rec?'⏹ หยุด':'🎙 เริ่มอัด'} col={rec?C.dan:C.pri} s={{width:'100%'}} fn={()=>sr(!rec)}/></Crd>
+    <Crd><ST ic="🎙" ch="อัดเสียงสรุปวันนี้"/>
+      {rec&&<div style={{display:'flex',alignItems:'center',gap:6,padding:'4px 0',marginBottom:4}}><div style={{width:8,height:8,borderRadius:'50%',background:C.dan,animation:'pulse 1s infinite'}}/><span style={{fontSize:9,color:C.dan,fontWeight:700}}>{"กำลังอัด…"}</span></div>}
+      {processing&&<div style={{fontSize:9,color:C.pri,marginBottom:4}}>{"⏳ กำลังถอดความ + วิเคราะห์…"}</div>}
+      {voiceUrl&&!rec&&!processing&&<audio controls src={voiceUrl} style={{width:'100%',height:28,marginBottom:4}}/>}
+      {transcript&&<div style={{fontSize:9,color:C.txt,background:'#F8FAFC',borderRadius:6,padding:'5px 7px',marginBottom:4,lineHeight:1.6,fontStyle:'italic'}}>{"\""+transcript.slice(0,120)+(transcript.length>120?'…':'')+"\""}</div>}
+      {sentiment&&<div style={{display:'flex',gap:3,marginBottom:4}}><div style={{flex:1,textAlign:'center',background:scoreCol(sentiment.score)+'15',borderRadius:5,padding:'3px 0',fontSize:8,color:scoreCol(sentiment.score),fontWeight:700}}>{"คะแนน "+sentiment.score+"/5"}</div><div style={{flex:2,textAlign:'center',background:(sentiment.flags.length?C.dan:C.suc)+'15',borderRadius:5,padding:'3px 0',fontSize:8,color:sentiment.flags.length?C.dan:C.suc,fontWeight:700}}>{sentiment.flags.length?'⚠️ '+sentiment.flags.join(', '):'✅ ไม่มีความเสี่ยง'}</div></div>}
+      <Btn ch={rec?'⏹ หยุดอัด':voiceUrl?'🔄 อัดใหม่':'🎙 เริ่มอัด'} col={rec?C.dan:C.pri} s={{width:'100%'}} fn={rec?stopRec:startRec} disabled={processing}/>
+    </Crd>
     <Crd><ST ic="💝" ch="ขอบคุณเพื่อนร่วมงาน"/><div style={{fontSize:9,color:'#94A3B8',marginBottom:5}}>{"❤️ แดง = ส่งให้เพื่อน · 🖤 ดำ = Ops เท่านั้น"}</div>
       {[{k:'s1',n:'คุณสมชาย',ic:'🚗'},{k:'s2',n:'คุณนิภา',ic:'💊'}].map(m=><div key={m.k} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'5px 0',borderBottom:'1px solid '+C.bdr}}>
         <div style={{display:'flex',alignItems:'center',gap:6}}><span style={{fontSize:16}}>{m.ic}</span><span style={{fontWeight:700,fontSize:11}}>{m.n}</span></div>
@@ -998,29 +1044,59 @@ function RHomeMain({openHam,goTo}){
   </div>;
 }
 
-// RJobToday enhanced (instruction 11, 12)
+// RJobToday enhanced — photo capture + vitals
 function RJobToday(){
-  const[photoTaken,setPhoto]=useState(false);
   const[job,setJob]=useState(()=>getActiveJob());
-  const STEPS=[{l:'รับจากบ้าน',ic:'🏠'},{l:'ถึง รพ.',ic:'🏥'},{l:'รอพบแพทย์',ic:'👨‍⚕️'},{l:'รอรับยา',ic:'💊'},{l:'ส่งกลับบ้าน',ic:'🏡'}];
+  const[stepPhotos,setStepPhotos]=useState({});
+  const[pendingPhotoStep,setPending]=useState(null);
+  const[bp,setBp]=useState('');const[spo2,setSpo2]=useState('');
+  const photoRef=useRef(null);
+  const STEPS=[{l:'รับจากบ้าน',ic:'🏠',photo:true},{l:'ถึง รพ.',ic:'🏥',photo:true},{l:'รอพบแพทย์',ic:'👨‍⚕️',vitals:true},{l:'รอรับยา',ic:'💊'},{l:'ส่งกลับบ้าน',ic:'🏡',vitals:true}];
   useEffect(()=>{const load=()=>setJob(getActiveJob());window.addEventListener(JOB_UPDATED_EVENT,load);return()=>window.removeEventListener(JOB_UPDATED_EVENT,load);},[]);
   const cpMap={};(job?.checkpoints||[]).forEach(cp=>{cpMap[cp.label]=cp.time;});
+  const cpPhotoMap={};(job?.checkpoints||[]).forEach(cp=>{if(cp.photo)cpPhotoMap[cp.label]=cp.photo;});
+  const cpVitals=(job?.checkpoints||[]).find(cp=>cp.vitals)?.vitals;
   const activeIdx=STEPS.findIndex(s=>!cpMap[s.l]);
   const handleStep=l=>{if(job&&!cpMap[l])addCheckpoint(job.jobId,l);};
   const fmtTime=iso=>{try{const d=new Date(iso);return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');}catch{return'';}};
+  const triggerPhoto=l=>{setPending(l);photoRef.current?.click();};
+  const onPhotoChange=e=>{
+    const f=e.target.files?.[0];if(!f||!pendingPhotoStep)return;
+    const r=new FileReader();r.onload=ev=>{
+      const b64=ev.target.result;
+      setStepPhotos(p=>({...p,[pendingPhotoStep]:b64}));
+      if(job)addCheckpointWithData(job.jobId,pendingPhotoStep,{photo:b64});
+    };r.readAsDataURL(f);
+    e.target.value='';setPending(null);
+  };
+  const saveVitals=()=>{if(job&&(bp||spo2)){addCheckpointWithData(job.jobId,'vitals',{vitals:{bp,spo2}});setBp('');setSpo2('');}};
+  const showVitalsStep=STEPS[activeIdx]?.vitals;
   return <div style={{padding:'8px 9px',background:C.bg}}>
+    <input ref={photoRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={onPhotoChange}/>
     <PatientBrief/>
     <div style={{background:'#1E3A8A',borderRadius:9,padding:'7px 10px',marginBottom:6,textAlign:'center'}}><div style={{fontSize:8,color:'rgba(255,255,255,0.6)',marginBottom:2}}>{"🔐 PIN ยืนยันตัวตน"}</div><div style={{fontSize:28,fontWeight:900,letterSpacing:8,color:'#93C5FD'}}>{"7421"}</div></div>
-    {STEPS.map((s,i)=>{const done=!!cpMap[s.l];const active=i===activeIdx;return<div key={i} onClick={()=>active&&handleStep(s.l)} style={{display:'flex',alignItems:'center',gap:7,padding:'5px 8px',borderRadius:8,marginBottom:3,background:done?'#ECFDF5':active?C.pri:'#fff',border:`1px solid ${done?'#6EE7B7':active?C.pri:C.bdr}`,cursor:active?'pointer':'default'}}>
-      <span style={{fontSize:14}}>{done?'✅':s.ic}</span>
-      <div style={{flex:1,fontSize:10,fontWeight:active?700:400,color:active?'#fff':done?C.suc:C.txt}}>{s.l}{active&&<span style={{fontSize:8,opacity:0.7}}>{" · กดเพื่อบันทึก"}</span>}</div>
-      {cpMap[s.l]&&<span style={{fontSize:8,color:C.mid}}>{fmtTime(cpMap[s.l])}</span>}
+    {STEPS.map((s,i)=>{const done=!!cpMap[s.l];const active=i===activeIdx;const ph=cpPhotoMap[s.l]||stepPhotos[s.l];return<div key={i} style={{marginBottom:3}}>
+      <div onClick={()=>active&&handleStep(s.l)} style={{display:'flex',alignItems:'center',gap:7,padding:'5px 8px',borderRadius:8,background:done?'#ECFDF5':active?C.pri:'#fff',border:`1px solid ${done?'#6EE7B7':active?C.pri:C.bdr}`,cursor:active?'pointer':'default'}}>
+        <span style={{fontSize:14}}>{done?'✅':s.ic}</span>
+        <div style={{flex:1,fontSize:10,fontWeight:active?700:400,color:active?'#fff':done?C.suc:C.txt}}>{s.l}{active&&<span style={{fontSize:8,opacity:0.7}}>{" · กดเพื่อบันทึก"}</span>}</div>
+        {done&&s.photo&&<div onClick={e=>{e.stopPropagation();triggerPhoto(s.l);}} style={{fontSize:10,cursor:'pointer',padding:'2px 5px',borderRadius:4,background:ph?'transparent':'rgba(255,255,255,0.15)',color:ph?C.suc:'rgba(255,255,255,0.7)'}}>{ph?'📷✅':'📷'}</div>}
+        {cpMap[s.l]&&<span style={{fontSize:8,color:active?'rgba(255,255,255,0.6)':C.mid}}>{fmtTime(cpMap[s.l])}</span>}
+      </div>
+      {ph&&<img src={ph} style={{width:'100%',height:54,objectFit:'cover',borderRadius:'0 0 7px 7px',border:'1px solid '+C.bdr,borderTop:'none'}}/>}
     </div>;})}
+    {showVitalsStep&&activeIdx>=0&&<Crd s={{border:'1px solid '+C.wrn+'60',background:'#FFFBEB'}}>
+      <ST ic="🩺" ch="บันทึก Vitals (optional)"/>
+      <div style={{display:'flex',gap:5,marginBottom:4}}>
+        <input value={bp} onChange={e=>setBp(e.target.value)} placeholder="BP เช่น 120/80" style={{flex:1,padding:'5px 7px',borderRadius:6,border:'1px solid '+C.bdr,fontSize:9,outline:'none'}}/>
+        <input value={spo2} onChange={e=>setSpo2(e.target.value)} placeholder="SpO2 %" style={{flex:1,padding:'5px 7px',borderRadius:6,border:'1px solid '+C.bdr,fontSize:9,outline:'none'}}/>
+      </div>
+      {cpVitals?<div style={{fontSize:9,color:C.suc}}>{"✅ บันทึกแล้ว · BP "+cpVitals.bp+" · SpO2 "+cpVitals.spo2+"%"}</div>:<Btn ch="💾 บันทึก Vitals" col={C.wrn} sm s={{width:'100%'}} fn={saveVitals}/>}
+    </Crd>}
     {activeIdx===-1&&job&&<Alrt t="success" ch="✅ ครบทุกขั้นตอนแล้วค่ะ — กด 🏁 ปิดงานได้เลยค่ะ"/>}
     <div style={{display:'flex',gap:4,marginTop:6}}>
-      <div onClick={()=>setPhoto(!photoTaken)} style={{flex:1,padding:'8px 6px',textAlign:'center',borderRadius:8,border:`1.5px solid ${photoTaken?C.suc:C.bdr}`,background:photoTaken?'#ECFDF5':'#F8FAFC',cursor:'pointer'}}>
-        <div style={{fontSize:18}}>{photoTaken?'✅':'📷'}</div>
-        <div style={{fontSize:8,color:photoTaken?C.suc:C.mid}}>{"ถ่ายรูปคุณยาย"}</div>
+      <div onClick={()=>activeIdx>=0&&triggerPhoto(STEPS[activeIdx]?.l)} style={{flex:1,padding:'8px 6px',textAlign:'center',borderRadius:8,border:`1.5px solid ${Object.keys(stepPhotos).length>0?C.suc:C.bdr}`,background:Object.keys(stepPhotos).length>0?'#ECFDF5':'#F8FAFC',cursor:'pointer'}}>
+        <div style={{fontSize:18}}>{Object.keys(stepPhotos).length>0?'✅':'📷'}</div>
+        <div style={{fontSize:8,color:Object.keys(stepPhotos).length>0?C.suc:C.mid}}>{"ถ่ายรูป"+(Object.keys(stepPhotos).length>0?' ('+Object.keys(stepPhotos).length+'รูป)':'')}</div>
       </div>
       <div style={{flex:1,padding:'8px 6px',textAlign:'center',borderRadius:8,border:'1.5px solid '+C.bdr,background:'#F8FAFC',cursor:'pointer'}}>
         <div style={{fontSize:18}}>{"📍"}</div>
@@ -1086,12 +1162,51 @@ function CDHomeMain({openHam,goTo}){
 }
 
 function CDashOCR(){
+  const SLOTS=['ใบสั่งยา','ใบเสร็จ'];
+  const[photos,setPhotos]=useState({});
+  const[medicines,setMedicines]=useState([]);
+  const[verified,setVerified]=useState({});
+  const[scanning,setScanning]=useState(false);
+  const[pendingSlot,setPendingSlot]=useState(null);
+  const photoRef=useRef(null);
+  const job=getActiveJob();
+  const triggerCapture=slot=>{setPendingSlot(slot);photoRef.current?.click();};
+  const onCapture=e=>{
+    const f=e.target.files?.[0];if(!f||!pendingSlot)return;
+    const r=new FileReader();r.onload=ev=>{setPhotos(p=>({...p,[pendingSlot]:ev.target.result}));};
+    r.readAsDataURL(f);e.target.value='';setPendingSlot(null);
+  };
+  const runOCR=async()=>{
+    const img=photos['ใบสั่งยา'];if(!img)return;
+    const k=getApiKey();setScanning(true);
+    try{
+      const result=k?await scanPrescription(img,k):[{name:'AMLODIPINE',dose:'5mg',frequency:'วันละครั้ง'},{name:'Warfarin',dose:'2mg',frequency:'วันละครั้งตอนเย็น'},{name:'Multivitamin',dose:'1เม็ด',frequency:'หลังอาหารเช้า'}];
+      setMedicines(result.length>0?result:[{name:'AMLODIPINE',dose:'5mg',frequency:'วันละครั้ง'},{name:'Multivitamin',dose:'1เม็ด',frequency:'ทุกเช้า'}]);
+    }catch{setMedicines([{name:'AMLODIPINE',dose:'5mg',frequency:'วันละครั้ง'}]);}
+    finally{setScanning(false);}
+  };
+  const verifyMed=(name)=>{
+    setVerified(v=>({...v,[name]:!v[name]}));
+    if(job&&!verified[name])addCheckpointWithData(job.jobId,'ตรวจยา: '+name,{});
+  };
+  const allVerified=medicines.length>0&&medicines.every(m=>verified[m.name]);
   return <div style={{padding:'8px 9px',background:C.bg}}>
-    <Alrt t="danger" ch="🔔 คุณแม่มุก เข้าพบหมอแล้ว! → รับใบสั่งยา"/>
-    <ST ic="📷" ch="ตรวจยา OCR"/>
-    <Photo l="ใบสั่งยา" done={true}/><Photo l="ใบเสร็จ" done={true}/><Photo l="AMLODIPINE" done={true}/><Photo l="Multivitamin" done={true}/><Photo l="Warfarin — รอถ่าย" done={false}/>
-    <Alrt t="warning" ch="✦ AI ตรวจ 2/3 · รอ Warfarin"/>
-    <Btn ch="ยาครบ → เรียก Grab (รอ 3/3)" col={C.pri} s={{width:'100%',opacity:.4,cursor:'default'}}/>
+    <input ref={photoRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={onCapture}/>
+    <Alrt t={job?'danger':'info'} ch={job?'🔔 '+(job.bookingData?.patient?.name||'ผู้ป่วย')+' เข้าพบหมอแล้ว! → รับใบสั่งยา':'📷 ถ่ายรูปใบสั่งยาเพื่อ OCR'}/>
+    <ST ic="📷" ch="ถ่ายเอกสาร"/>
+    <div style={{display:'flex',gap:4,marginBottom:6}}>
+      {SLOTS.map(s=><div key={s} onClick={()=>triggerCapture(s)} style={{flex:1,borderRadius:8,border:`1.5px solid ${photos[s]?C.suc:C.bdr}`,background:photos[s]?'#ECFDF5':'#F8FAFC',overflow:'hidden',cursor:'pointer',minHeight:60,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}}>
+        {photos[s]?<img src={photos[s]} style={{width:'100%',height:60,objectFit:'cover'}}/>:<><div style={{fontSize:20}}>{"📷"}</div><div style={{fontSize:8,color:C.mid,padding:'0 4px',textAlign:'center'}}>{s}</div></>}
+      </div>)}
+    </div>
+    {photos['ใบสั่งยา']&&medicines.length===0&&<Btn ch={scanning?'⏳ กำลังสแกน…':'🔍 OCR สแกนรายการยา'} col={C.pri} s={{width:'100%',marginBottom:5,opacity:scanning?.6:1}} fn={runOCR} disabled={scanning}/>}
+    {medicines.length>0&&<><ST ic="💊" ch={"รายการยา ("+medicines.filter(m=>verified[m.name]).length+"/"+medicines.length+" ตรวจแล้ว)"}/>
+      {medicines.map((m,i)=><div key={i} onClick={()=>verifyMed(m.name)} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 8px',borderRadius:8,marginBottom:3,background:verified[m.name]?'#ECFDF5':'#fff',border:`1px solid ${verified[m.name]?'#6EE7B7':C.bdr}`,cursor:'pointer'}}>
+        <span style={{fontSize:16}}>{verified[m.name]?'✅':'💊'}</span>
+        <div style={{flex:1}}><div style={{fontSize:10,fontWeight:700,color:verified[m.name]?C.suc:C.txt}}>{m.name}</div><div style={{fontSize:9,color:C.mid}}>{m.dose+' · '+m.frequency}</div></div>
+      </div>)}
+      <Btn ch={allVerified?'✅ ยาครบ → เรียก Grab':'ยาครบ → เรียก Grab (รอตรวจ '+medicines.filter(m=>!verified[m.name]).length+' รายการ)'} col={allVerified?C.suc:C.pri} s={{width:'100%',opacity:allVerified?1:.5,cursor:allVerified?'pointer':'default'}} fn={allVerified?()=>{if(job)addCheckpoint(job.jobId,'รับยาครบแล้ว');}:undefined}/>
+    </>}
   </div>;
 }
 
