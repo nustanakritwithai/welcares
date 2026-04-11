@@ -119,6 +119,8 @@ async function callOpenRouter(
     if (!res.ok) {
       const err = await res.text();
       console.error('[clientLoop] OpenRouter error', res.status, err);
+      if (res.status === 401 || res.status === 403) throw new Error('API_KEY_INVALID');
+      if (res.status === 429) throw new Error('QUOTA_EXCEEDED');
       return null;
     }
 
@@ -189,8 +191,9 @@ function executeTool(name: string, argsJson: string, booking: BookingData): Tool
       // Save to localStorage as pending booking
       try {
         const saved = JSON.parse(localStorage.getItem('welcares_bookings') ?? '[]');
-        saved.push({ jobId, bookingData: booking, createdAt: new Date().toISOString() });
+        saved.push({ jobId, bookingData: booking, createdAt: new Date().toISOString(), status: 'pending' });
         localStorage.setItem('welcares_bookings', JSON.stringify(saved));
+        window.dispatchEvent(new Event('welcares_jobs_updated'));
       } catch { /* noop */ }
 
       return {

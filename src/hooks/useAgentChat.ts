@@ -130,12 +130,16 @@ export function useAgentChat(apiKey: string): AgentChatState & AgentChatActions 
       setQuickReplies(result.quickReplies);
       setMissingFields(result.missingFields);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'เกิดข้อผิดพลาด';
-      setError(msg);
+      const code = err instanceof Error ? err.message : 'เกิดข้อผิดพลาด';
+      const display =
+        code === 'API_KEY_INVALID' ? '🔑 API Key ไม่ถูกต้องค่ะ กรุณาตรวจสอบ API Key ที่กด 🔐 ด้านบนค่ะ' :
+        code === 'QUOTA_EXCEEDED' ? '⏳ API มีคนใช้เยอะค่ะ กรุณารอสักครู่แล้วลองใหม่ค่ะ' :
+        `⚠️ ขออภัยค่ะ: ${code}`;
+      setError(display);
       setMessages(prev => [...prev, {
         id: `err-${Date.now()}`,
         role: 'assistant',
-        content: `⚠️ ขออภัยค่ะ: ${msg}`,
+        content: display,
         timestamp: new Date().toISOString(),
       }]);
     } finally {
@@ -155,11 +159,20 @@ export function useAgentChat(apiKey: string): AgentChatState & AgentChatActions 
     setError(null);
   }, []);
 
+  const selectQuickReply = useCallback(async (text: string) => {
+    if (text === 'จองบริการอีกครั้ง') {
+      resetChat();
+      await handleSend('ต้องการจองบริการครั้งใหม่ค่ะ');
+    } else {
+      await handleSend(text);
+    }
+  }, [handleSend, resetChat]);
+
   return {
     messages, bookingData, status, jobId,
     quickReplies, missingFields, isThinking, error,
     sendMessage: handleSend,
-    selectQuickReply: handleSend,
+    selectQuickReply,
     resetChat,
   };
 }
