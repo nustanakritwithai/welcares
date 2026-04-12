@@ -1,6 +1,6 @@
 import{useState,useEffect,useRef,createContext,useContext}from"react";
 import{getJobs,assignJob,updateJob,addCheckpoint,addCheckpointWithData,updateVoiceData,addRating,getActiveJob,getRunningJobs,getJobCounts,JOB_UPDATED_EVENT}from'./lib/jobStore';
-import{createRecorder,transcribeAudio,analyzeTranscript,scanPrescription}from'./agents/voice/voicePipeline';
+import{createRecorder,transcribeAudio,analyzeTranscript,scanPrescription,chatWithAI}from'./agents/voice/voicePipeline';
 const getApiKey=()=>{try{return localStorage.getItem('welcares_api_key')||'';}catch{return'';}}
 import{IntakeAgentDemo}from'./agents/intake/demo/IntakeAgentDemo';
 import{IntakeChatDemo}from'./agents/intake-chat/demo/IntakeChatDemo';
@@ -43,6 +43,26 @@ function HamMenu({items,onClose}){
       </div>
     </div>
     <div style={{flex:1,background:'rgba(0,0,0,0.35)'}} onClick={onClose}/>
+  </div>;
+}
+
+// ── Voice utilities ──────────────────────────────────────────────
+function useAudioLevel(recRef,recording){
+  const[level,setLevel]=useState(0);
+  useEffect(()=>{
+    if(!recording||!recRef.current?.getLevel)return;
+    let raf;
+    const tick=()=>{setLevel(recRef.current?.getLevel()||0);raf=requestAnimationFrame(tick);};
+    raf=requestAnimationFrame(tick);
+    return()=>{cancelAnimationFrame(raf);setLevel(0);};
+  },[recording]);
+  return level;
+}
+function VoiceWave({recording,level=0}){
+  if(!recording)return null;
+  const base=[20,38,50,38,20];
+  return <div style={{display:'flex',gap:3,alignItems:'center',height:50,justifyContent:'center',margin:'4px 0'}}>
+    {base.map((b,i)=>{const h=Math.max(6,b*(0.3+level/100*0.7));return <div key={i} style={{width:5,height:h,background:C.dan,borderRadius:3,transition:'height 0.08s ease'}}/>;})}<span style={{fontSize:9,color:C.dan,fontWeight:700,marginLeft:6}}>{"กำลังฟัง…"}</span>
   </div>;
 }
 
@@ -799,13 +819,38 @@ function DReport(){
 }
 
 function DNCare(){
-  return <div style={{background:C.bg,minHeight:450}}>
-    <div style={{background:C.lin,padding:'8px 11px',display:'flex',alignItems:'center',gap:8}}><div style={{width:26,height:26,background:'white',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',fontSize:14}}>{"🤖"}</div><span style={{color:'white',fontWeight:700,fontSize:12}}>{"น้องแคร์"}</span></div>
-    <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:14,gap:10,marginTop:20}}>
-      <div style={{width:60,height:60,borderRadius:'50%',background:'#EEEDFE',border:'2px solid '+C.pri,display:'flex',alignItems:'center',justifyContent:'center',fontSize:28}}>{"🤖"}</div>
-      <div style={{background:'#EEEDFE',borderRadius:12,padding:10,textAlign:'center',width:'100%',border:'1px solid #AFA9EC'}}><div style={{fontSize:12,color:'#3C3489',lineHeight:1.7}}>{"สวัสดีคุณเจดา 😊\nมีอะไรให้น้องแคร์ช่วยไหมคะ?"}</div></div>
-      <button style={{width:70,height:70,borderRadius:'50%',background:C.pri,color:'#fff',fontSize:28,border:'3px solid rgba(127,119,221,.25)',cursor:'pointer'}}>{"🎙"}</button>
-      <div style={{fontSize:11,color:C.mid}}>{"กดค้างเพื่อพูดค่ะ"}</div>
+  const[msgs,setMsgs]=useState([{role:'ai',text:'สวัสดีคุณเจดา 😊 มีอะไรให้น้องแคร์ช่วยไหมคะ?'}]);
+  const[rec,setRec]=useState(false);const[proc,setProc]=useState(false);
+  const recRef=useRef(null);
+  const level=useAudioLevel(recRef,rec);
+  const PROMPT='คุณคือน้องแคร์ AI ผู้ช่วย Welcares สำหรับครอบครัว ตอบภาษาไทย 1-3 ประโยค ให้ข้อมูลสถานะผู้ป่วย นัดหมาย หรือข้อสงสัยเกี่ยวกับบริการ ใช้ภาษาสุภาพและเป็นมิตร';
+  const startV=async()=>{try{recRef.current=await createRecorder();recRef.current.start();setRec(true);}catch{alert('กรุณาอนุญาตใช้ไมค์ก่อนนะคะ 🙏');}};
+  const stopV=async()=>{
+    if(!recRef.current||!rec)return;
+    setRec(false);setProc(true);
+    const blob=await recRef.current.stop();
+    const k=getApiKey();
+    if(!k){setMsgs(m=>[...m,{role:'ai',text:'ยังไม่ได้ตั้งค่า API Key ค่ะ 🙏'}]);setProc(false);return;}
+    const tx=await transcribeAudio(blob,k);
+    if(tx)setMsgs(m=>[...m,{role:'user',text:tx}]);
+    const reply=await chatWithAI(tx||'...',k,PROMPT);
+    setMsgs(m=>[...m,{role:'ai',text:reply||'ขอโทษค่ะ ไม่ได้ยิน ลองใหม่นะคะ'}]);
+    setProc(false);
+  };
+  const last5=msgs.slice(-5);
+  return <div style={{background:C.bg,minHeight:450,display:'flex',flexDirection:'column'}}>
+    <div style={{background:C.lin,padding:'8px 11px',display:'flex',alignItems:'center',gap:8,flexShrink:0}}><div style={{width:26,height:26,background:'white',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',fontSize:14}}>{"🤖"}</div><span style={{color:'white',fontWeight:700,fontSize:12}}>{"น้องแคร์"}</span></div>
+    <div style={{flex:1,display:'flex',flexDirection:'column',gap:8,padding:'10px 12px',overflowY:'auto',maxHeight:300}}>
+      {last5.map((m,i)=><div key={i} style={{display:'flex',justifyContent:m.role==='ai'?'flex-start':'flex-end'}}>
+        <div style={{maxWidth:'80%',background:m.role==='ai'?'#EEEDFE':'#7F77DD',color:m.role==='ai'?'#3C3489':'#fff',borderRadius:m.role==='ai'?'4px 12px 12px 12px':'12px 4px 12px 12px',padding:'8px 12px',fontSize:11,lineHeight:1.6,border:m.role==='ai'?'1px solid #AFA9EC':'none'}}>{m.text}</div>
+      </div>)}
+      {proc&&<div style={{display:'flex',justifyContent:'flex-start'}}><div style={{background:'#EEEDFE',borderRadius:'4px 12px 12px 12px',padding:'8px 12px',fontSize:11,color:'#94A3B8',border:'1px solid #AFA9EC'}}>{"⏳ กำลังคิด…"}</div></div>}
+    </div>
+    <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:6,padding:'10px 12px',borderTop:'1px solid '+C.bdr,flexShrink:0}}>
+      <VoiceWave recording={rec} level={level}/>
+      <button onPointerDown={startV} onPointerUp={stopV} onPointerLeave={rec?stopV:undefined}
+        style={{width:60,height:60,borderRadius:'50%',background:rec?C.dan:C.pri,color:'#fff',fontSize:24,border:`3px solid ${rec?'rgba(239,68,68,.25)':'rgba(127,119,221,.25)'}`,cursor:'pointer',transition:'background .2s',userSelect:'none',WebkitUserSelect:'none',touchAction:'none'}}>{"🎙"}</button>
+      <div style={{fontSize:10,color:C.mid}}>{rec?'ปล่อยเมื่อพูดเสร็จ':'กดค้างเพื่อพูดค่ะ'}</div>
     </div>
   </div>;
 }
@@ -840,7 +885,42 @@ function GHome(){
     </Crd>
   </div>;
 }
-function GNCare(){return <div style={{background:'#EEEDFE',minHeight:450,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:16,gap:12}}><div style={{width:70,height:70,borderRadius:'50%',background:'white',border:'3px solid '+C.pri,display:'flex',alignItems:'center',justifyContent:'center',fontSize:34}}>{"🤖"}</div><div style={{fontSize:22,fontWeight:800,color:'#3C3489'}}>{"น้องแคร์"}</div><div style={{background:'white',borderRadius:16,padding:14,textAlign:'center',width:'100%',border:'2px solid '+C.pri}}><div style={{fontSize:GF.large,color:'#3C3489',lineHeight:1.8}}>{"มีอะไรให้น้องแคร์\nช่วยไหมคะ? 💚"}</div></div><button style={{width:86,height:86,borderRadius:'50%',background:C.pri,color:'#fff',fontSize:38,border:'4px solid rgba(127,119,221,.3)',cursor:'pointer'}}>{"🎙"}</button><div style={{fontSize:GF.base,color:C.mid}}>{"กดค้างเพื่อพูดค่ะ"}</div></div>;}
+function GNCare(){
+  const[msgs,setMsgs]=useState([{role:'ai',text:'มีอะไรให้น้องแคร์ช่วยไหมคะ? 💚'}]);
+  const[rec,setRec]=useState(false);const[proc,setProc]=useState(false);
+  const recRef=useRef(null);
+  const level=useAudioLevel(recRef,rec);
+  const PROMPT='คุณคือน้องแคร์ AI ผู้ช่วยดูแลผู้สูงอายุของ Welcares ตอบภาษาไทย สั้น อบอุ่น 1-2 ประโยค ใช้ Emoji เพิ่มความน่ารัก ห้ามพูดยาว';
+  const startV=async()=>{try{recRef.current=await createRecorder();recRef.current.start();setRec(true);}catch{alert('กรุณาอนุญาตใช้ไมค์ก่อนนะคะ 🙏');}};
+  const stopV=async()=>{
+    if(!recRef.current||!rec)return;
+    setRec(false);setProc(true);
+    const blob=await recRef.current.stop();
+    const k=getApiKey();
+    if(!k){setMsgs(m=>[...m,{role:'ai',text:'ยังไม่ได้ตั้งค่า API Key ค่ะ กรุณาใส่ที่เมนูตั้งค่าก่อนนะคะ 🙏'}]);setProc(false);return;}
+    const tx=await transcribeAudio(blob,k);
+    if(tx)setMsgs(m=>[...m,{role:'user',text:tx}]);
+    const reply=await chatWithAI(tx||'...', k, PROMPT);
+    setMsgs(m=>[...m,{role:'ai',text:reply||'ขอโทษค่ะ ไม่ได้ยินชัดเจน ลองพูดใหม่ได้เลยนะคะ 🙏'}]);
+    setProc(false);
+  };
+  const last5=msgs.slice(-5);
+  return <div style={{background:'#EEEDFE',minHeight:450,display:'flex',flexDirection:'column',padding:14,gap:8}}>
+    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}><div style={{width:36,height:36,borderRadius:'50%',background:'white',border:'2px solid '+C.pri,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18}}>{"🤖"}</div><div style={{fontSize:16,fontWeight:800,color:'#3C3489'}}>{"น้องแคร์"}</div></div>
+    <div style={{flex:1,display:'flex',flexDirection:'column',gap:8,overflowY:'auto',maxHeight:280}}>
+      {last5.map((m,i)=><div key={i} style={{display:'flex',justifyContent:m.role==='ai'?'flex-start':'flex-end'}}>
+        <div style={{maxWidth:'80%',background:m.role==='ai'?'white':'#7F77DD',color:m.role==='ai'?'#3C3489':'#fff',borderRadius:m.role==='ai'?'4px 14px 14px 14px':'14px 4px 14px 14px',padding:'10px 14px',fontSize:GF.large,lineHeight:1.6,border:m.role==='ai'?'1px solid #AFA9EC':'none'}}>{m.text}</div>
+      </div>)}
+      {proc&&<div style={{display:'flex',justifyContent:'flex-start'}}><div style={{background:'white',borderRadius:'4px 14px 14px 14px',padding:'10px 14px',fontSize:GF.large,color:'#94A3B8',border:'1px solid #AFA9EC'}}>{"⏳ กำลังคิด…"}</div></div>}
+    </div>
+    <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:6,paddingTop:8,borderTop:'1px solid #AFA9EC'}}>
+      <VoiceWave recording={rec} level={level}/>
+      <button onPointerDown={startV} onPointerUp={stopV} onPointerLeave={rec?stopV:undefined}
+        style={{width:86,height:86,borderRadius:'50%',background:rec?C.dan:C.pri,color:'#fff',fontSize:38,border:`4px solid ${rec?'rgba(239,68,68,.3)':'rgba(127,119,221,.3)'}`,cursor:'pointer',transition:'background .2s',userSelect:'none',WebkitUserSelect:'none',touchAction:'none'}}>{"🎙"}</button>
+      <div style={{fontSize:GF.base,color:C.mid}}>{rec?'ปล่อยเมื่อพูดเสร็จ':'กดค้างเพื่อพูดค่ะ'}</div>
+    </div>
+  </div>;
+}
 function GUpcoming(){
   const[mode,sm]=useState('week');
   const[apptJob,setApptJob]=useState(()=>getJobs().find(j=>j.status!=='cancelled'&&j.status!=='completed'));
@@ -888,16 +968,18 @@ function GPraise(){
   const[submitted,setSubmitted]=useState(false);
   const[rec,setRec]=useState(false);const[voiceUrl,setVUrl]=useState(null);
   const recRef=useRef(null);
+  const level=useAudioLevel(recRef,rec);
   const startVoice=async()=>{try{recRef.current=await createRecorder();recRef.current.start();setRec(true);}catch(e){console.error(e);}};
-  const stopVoice=async()=>{if(!recRef.current)return;setRec(false);try{const blob=await recRef.current.stop();setVUrl(URL.createObjectURL(blob));}catch(e){console.error(e);}};
+  const stopVoice=async()=>{if(!recRef.current||!rec)return;setRec(false);try{const blob=await recRef.current.stop();setVUrl(URL.createObjectURL(blob));}catch(e){console.error(e);}};
   const submit=()=>{const j=getJobs().find(j=>j.status==='completed');if(j&&score>0){addRating(j.jobId,score,voiceUrl||undefined);setSubmitted(true);}else if(score>0)setSubmitted(true);};
   const careTeam=getJobs().find(j=>j.status==='completed')?.assignedTo||'คุณทิพย์';
   if(submitted)return<div style={{background:'#fff',padding:14,textAlign:'center'}}><div style={{fontSize:48,marginBottom:8}}>{"🙏"}</div><div style={{fontSize:GF.large,fontWeight:800,color:C.suc}}>{"ขอบคุณมากค่ะ!"}</div><div style={{fontSize:GF.base,color:C.mid,marginTop:4}}>{"คะแนน "+score+" ดาว · "+careTeam}</div>{voiceUrl&&<audio controls src={voiceUrl} style={{width:'100%',height:32,marginTop:8}}/>}</div>;
   return<div style={{background:'#fff',padding:14,display:'flex',flexDirection:'column',gap:10}}>
     <div style={{textAlign:'center'}}><div style={{fontSize:36,marginBottom:6}}>{"🏡"}</div><div style={{fontSize:GF.large,fontWeight:800}}>{"กลับถึงบ้านแล้วค่ะ"}</div><div style={{fontSize:GF.base,color:C.mid,marginTop:4}}>{"ชอบ"+careTeam+"ไหมคะ?"}</div></div>
     <div style={{display:'flex',gap:8,justifyContent:'center'}}>{[1,2,3,4,5].map(i=><span key={i} onClick={()=>setScore(i)} onMouseEnter={()=>setHover(i)} onMouseLeave={()=>setHover(0)} style={{fontSize:36,cursor:'pointer',color:i<=(hover||score)?'#EF9F27':'#CBD5E1',transition:'color .15s'}}>{i<=(hover||score)?'★':'☆'}</span>)}</div>
-    <div onPointerDown={startVoice} onPointerUp={stopVoice} onPointerLeave={rec?stopVoice:undefined} style={{width:'100%',padding:14,borderRadius:14,background:rec?C.dan+'20':'#FAECE7',border:`2px solid ${rec?C.dan:'#D85A30'}`,color:rec?C.dan:'#D85A30',fontSize:GF.base,fontWeight:700,textAlign:'center',cursor:'pointer',userSelect:'none'}}>
-      {rec?<>{"⏹ กำลังฟัง…"}</>:<>{"❤️ กดค้างพูดบอกความรู้สึก"}</>}
+    <div onPointerDown={startVoice} onPointerUp={stopVoice} onPointerLeave={rec?stopVoice:undefined}
+      style={{width:'100%',padding:'10px 14px',borderRadius:14,background:rec?C.dan+'10':'#FAECE7',border:`2px solid ${rec?C.dan:'#D85A30'}`,cursor:'pointer',userSelect:'none',WebkitUserSelect:'none',touchAction:'none',display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
+      {rec?<VoiceWave recording={rec} level={level}/>:<div style={{color:'#D85A30',fontSize:GF.base,fontWeight:700}}>{"❤️ กดค้างพูดบอกความรู้สึก"}</div>}
     </div>
     {voiceUrl&&<audio controls src={voiceUrl} style={{width:'100%',height:32}}/>}
     {score>0&&<button onClick={submit} style={{width:'100%',padding:14,borderRadius:12,background:C.suc,color:'#fff',border:'none',fontSize:GF.large,fontWeight:700,cursor:'pointer'}}>{"ส่งความคิดเห็น ✅"}</button>}
@@ -937,17 +1019,34 @@ function PatientBrief(){
 }
 
 function CTOpContact(){
+  const[rec,setRec]=useState(false);const[proc,setProc]=useState(false);
+  const[tx,setTx]=useState('');const[sent,setSent]=useState(false);
+  const recRef=useRef(null);
+  const level=useAudioLevel(recRef,rec);
+  const startV=async()=>{try{recRef.current=await createRecorder();recRef.current.start();setRec(true);}catch{alert('ไม่สามารถเข้าถึงไมค์ได้ค่ะ');}};
+  const stopV=async()=>{
+    if(!recRef.current||!rec)return;
+    setRec(false);setProc(true);
+    const blob=await recRef.current.stop();
+    const k=getApiKey();
+    if(k){const t=await transcribeAudio(blob,k);if(t){setTx(t);const j=getActiveJob();if(j)addCheckpointWithData(j.jobId,'Voice Report',{note:t});}}
+    setProc(false);
+  };
   return <div style={{background:C.bg}}>
     <div style={{background:C.lin,padding:'8px 11px',display:'flex',alignItems:'center',gap:8}}><div style={{width:24,height:24,background:'white',borderRadius:7,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13}}>{"🤖"}</div><span style={{color:'white',fontWeight:700,fontSize:11}}>{"น้องแคร์ + ติดต่อ Ops"}</span></div>
     <div style={{display:'flex',flexDirection:'column',alignItems:'center',padding:'10px 12px',gap:8}}>
-      <button style={{width:62,height:62,borderRadius:'50%',background:C.pri,color:'#fff',fontSize:24,border:'3px solid rgba(127,119,221,.25)',cursor:'pointer',marginTop:10}}>{"🎙"}</button>
-      <div style={{fontSize:11,color:C.mid}}>{"กดค้างพูดกับน้องแคร์"}</div>
+      <VoiceWave recording={rec} level={level}/>
+      <button onPointerDown={startV} onPointerUp={stopV} onPointerLeave={rec?stopV:undefined}
+        style={{width:62,height:62,borderRadius:'50%',background:rec?C.dan:C.pri,color:'#fff',fontSize:24,border:`3px solid ${rec?'rgba(239,68,68,.25)':'rgba(127,119,221,.25)'}`,cursor:'pointer',marginTop:rec?0:10,transition:'background .2s',userSelect:'none',WebkitUserSelect:'none',touchAction:'none'}}>{"🎙"}</button>
+      <div style={{fontSize:11,color:C.mid}}>{rec?'ปล่อยเมื่อพูดเสร็จ':proc?'⏳ กำลังถอดความ…':'กดค้างรายงานให้ Ops'}</div>
+      {tx&&<div style={{width:'100%',background:'#F8FAFC',border:'1px solid '+C.bdr,borderRadius:8,padding:'7px 9px',fontSize:10,color:C.txt,lineHeight:1.6,fontStyle:'italic'}}>{"\""+tx+"\""}</div>}
+      {tx&&!sent&&<Btn ch="📤 ส่ง Ops →" col={C.pri} s={{width:'100%'}} fn={()=>setSent(true)}/>}
+      {sent&&<Alrt t="success" ch="✅ ส่ง Ops แล้วค่ะ · จะได้รับการตอบกลับเร็วๆ นี้"/>}
       <HR/>
       <div style={{width:'100%'}}><div style={{fontSize:10,fontWeight:700,marginBottom:5}}>{"📞 ติดต่อ Operation"}</div>
         {[{col:C.suc,ic:'🟢',l:'ไม่เร่งด่วน',s:'ตอบใน 1 ชม.'},{col:C.wrn,ic:'🟡',l:'รอคำตอบ',s:'ตอบใน 15 นาที'},{col:C.dan,ic:'🔴',l:'ฉุกเฉิน — โทรทันที',s:''}].map((b,i)=>(
           <button key={i} style={{width:'100%',padding:'7px 9px',borderRadius:8,marginBottom:4,display:'flex',alignItems:'center',gap:8,border:`1px solid ${b.col}30`,background:`${b.col}10`,cursor:'pointer'}}><span style={{fontSize:13}}>{b.ic}</span><div style={{fontSize:11,fontWeight:700,color:b.col}}>{b.l}{b.s&&<div style={{fontSize:9,color:C.mid,fontWeight:400}}>{b.s}</div>}</div></button>
         ))}
-        <Btn ch="ส่งให้ Operation →" col={C.pri} s={{width:'100%'}}/>
       </div>
     </div>
   </div>;
@@ -998,6 +1097,7 @@ function CloseHearts(){
   const[voiceUrl,setVoiceUrl]=useState(null);const[transcript,setTranscript]=useState('');
   const[sentiment,setSentiment]=useState(null);
   const recRef=useRef(null);
+  const level=useAudioLevel(recRef,rec);
   const toggle=(k,t)=>sh(h=>({...h,[k]:h[k]===t?null:t}));
   const handleClose=()=>{const j=getActiveJob();if(j)updateJob(j.jobId,{status:'completed'});setClosed(true);};
   const startRec=async()=>{
@@ -1023,7 +1123,7 @@ function CloseHearts(){
   return <div style={{padding:'8px 9px',background:C.bg}}>
     <Crd s={{background:'#ECFDF5',border:'1px solid #6EE7B7',textAlign:'center'}}><div style={{fontSize:16}}>{"✅"}</div><div style={{fontWeight:700,color:C.suc}}>{"ส่งคุณยายถึงบ้านแล้ว"}</div></Crd>
     <Crd><ST ic="🎙" ch="อัดเสียงสรุปวันนี้"/>
-      {rec&&<div style={{display:'flex',alignItems:'center',gap:6,padding:'4px 0',marginBottom:4}}><div style={{width:8,height:8,borderRadius:'50%',background:C.dan,animation:'pulse 1s infinite'}}/><span style={{fontSize:9,color:C.dan,fontWeight:700}}>{"กำลังอัด…"}</span></div>}
+      <VoiceWave recording={rec} level={level}/>
       {processing&&<div style={{fontSize:9,color:C.pri,marginBottom:4}}>{"⏳ กำลังถอดความ + วิเคราะห์…"}</div>}
       {voiceUrl&&!rec&&!processing&&<audio controls src={voiceUrl} style={{width:'100%',height:28,marginBottom:4}}/>}
       {transcript&&<div style={{fontSize:9,color:C.txt,background:'#F8FAFC',borderRadius:6,padding:'5px 7px',marginBottom:4,lineHeight:1.6,fontStyle:'italic'}}>{"\""+transcript.slice(0,120)+(transcript.length>120?'…':'')+"\""}</div>}

@@ -17,10 +17,36 @@ const OPENROUTER_AUDIO_URL = 'https://openrouter.ai/api/v1/audio/transcriptions'
 export interface Recorder {
   start: () => void;
   stop: () => Promise<Blob>;
+  getLevel: () => number;  // 0–100 real-time amplitude
 }
 
 export async function createRecorder(): Promise<Recorder> {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      sampleRate: 44100,
+      channelCount: 1,
+    },
+  });
+
+  // Web Audio API — real-time level monitoring
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const AudioCtx = (window.AudioContext || (window as any).webkitAudioContext) as typeof AudioContext;
+  const audioCtx = new AudioCtx();
+  const source = audioCtx.createMediaStreamSource(stream);
+  const analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  source.connect(analyser);
+  const freqData = new Uint8Array(analyser.frequencyBinCount);
+
+  const getLevel = (): number => {
+    analyser.getByteFrequencyData(freqData);
+    const avg = freqData.reduce((a, b) => a + b, 0) / freqData.length;
+    return Math.min(100, (avg / 128) * 100);
+  };
+
   const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
     ? 'audio/webm;codecs=opus'
     : 'audio/webm';
@@ -34,10 +60,12 @@ export async function createRecorder(): Promise<Recorder> {
     stop: () => new Promise(resolve => {
       mr.onstop = () => {
         stream.getTracks().forEach(t => t.stop());
+        audioCtx.close();
         resolve(new Blob(chunks, { type: mimeType }));
       };
       mr.stop();
     }),
+    getLevel,
   };
 }
 
@@ -131,6 +159,45 @@ export async function analyzeTranscript(
   } catch (err) {
     console.error('[voicePipeline] analyzeTranscript error', err);
     return fallback;
+  }
+}
+
+// ============================================================================
+// CONVERSATIONAL AI — voice assistant responses
+// ============================================================================
+
+export async function chatWithAI(
+  message: string,
+  apiKey: string,
+  systemPrompt: string,
+): Promise<string> {
+  if (!apiKey || !message.trim()) return '';
+  try {
+    const res = await fetch(OPENROUTER_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'HTTP-Referer': window.location.origin,
+        'X-Title': 'WelCares Voice Assistant',
+      },
+      body: JSON.stringify({
+        model: 'openai/gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: message },
+        ],
+        temperature: 0.7,
+        max_tokens: 150,
+      }),
+    });
+    if (!res.ok) return '';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any = await res.json();
+    return data?.choices?.[0]?.message?.content?.trim() ?? '';
+  } catch (err) {
+    console.error('[voicePipeline] chatWithAI error', err);
+    return '';
   }
 }
 
