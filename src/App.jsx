@@ -1,5 +1,5 @@
 import{useState,useEffect,useRef,createContext,useContext}from"react";
-import{getJobs,assignJob,updateJob,addCheckpoint,addCheckpointWithData,updateVoiceData,getActiveJob,getRunningJobs,getJobCounts,JOB_UPDATED_EVENT}from'./lib/jobStore';
+import{getJobs,assignJob,updateJob,addCheckpoint,addCheckpointWithData,updateVoiceData,addRating,getActiveJob,getRunningJobs,getJobCounts,JOB_UPDATED_EVENT}from'./lib/jobStore';
 import{createRecorder,transcribeAudio,analyzeTranscript,scanPrescription}from'./agents/voice/voicePipeline';
 const getApiKey=()=>{try{return localStorage.getItem('welcares_api_key')||'';}catch{return'';}}
 import{IntakeAgentDemo}from'./agents/intake/demo/IntakeAgentDemo';
@@ -105,6 +105,7 @@ function LPhone({msgs}){
             <div style={{background:'white',borderRadius:'0 9px 9px 9px',padding:'7px 9px',fontSize:10,border:'1px solid '+C.bdr,lineHeight:1.65}}>
               {m.title&&<div style={{fontWeight:700,color:C.pri,marginBottom:2}}>{m.title}</div>}
               <div style={{whiteSpace:'pre-line',color:C.txt}}>{m.body}</div>
+              {m.photo&&<img src={m.photo} style={{width:'100%',maxHeight:90,objectFit:'cover',borderRadius:6,marginTop:5,border:'1px solid '+C.bdr}}/>}
               {m.cta&&<div style={{marginTop:5}}><Btn ch={m.cta} col={C.lin} sm/></div>}
             </div>
           </div>
@@ -790,7 +791,7 @@ function DReport(){
       {noteStatus==='pending'&&<Crd s={{background:'#FFFBEB',border:'1px solid #F59E0B'}}>
         <div style={{fontSize:9,fontWeight:700,color:'#92400E',marginBottom:2}}>{"⏳ รอ Ops อนุมัติ (ช่วงแรก)"}</div>
         <div style={{fontSize:8,color:C.mid,marginBottom:5}}>{"หลังจาก Ops approve ครั้งแรก AI Agent จะดูแลแทนอัตโนมัติ"}</div>
-        <Btn ch="✅ Ops: อนุมัติส่งให้ลูกสาว" col={C.suc} s={{width:'100%'}} fn={()=>setNS('approved')}/>
+        <Btn ch="✅ Ops: อนุมัติส่งให้ลูกสาว" col={C.suc} s={{width:'100%'}} fn={()=>{setNS('approved');const j=getJobs().find(j=>j.status==='completed');if(j)updateJob(j.jobId,{reportApproved:true});}}/>
       </Crd>}
       {noteStatus==='approved'&&<Alrt t="success" ch="✅ Ops อนุมัติแล้ว — AI Agent ส่งให้ลูกสาวอัตโนมัติ · ต่อไปไม่ต้อง approve"/>}
     </>}
@@ -882,7 +883,26 @@ function GPINTimeline(){
     {vitals&&<div style={{background:'#EFF6FF',borderRadius:10,padding:'8px 10px',border:'1px solid #BFDBFE',marginTop:4}}><div style={{fontSize:GF.base-2,color:'#1E3A8A',fontWeight:700,marginBottom:2}}>{"🩺 ข้อมูลสุขภาพวันนี้"}</div>{vitals.bp&&<div style={{fontSize:GF.base-2,color:C.txt}}>{"ความดัน: "+vitals.bp}</div>}{vitals.spo2&&<div style={{fontSize:GF.base-2,color:C.txt}}>{"SpO2: "+vitals.spo2+"%"}</div>}</div>}
   </div>;
 }
-function GPraise(){return <div style={{background:'#fff',padding:14,display:'flex',flexDirection:'column',gap:10}}><div style={{textAlign:'center'}}><div style={{fontSize:36,marginBottom:6}}>{"🏡"}</div><div style={{fontSize:GF.large,fontWeight:800}}>{"กลับถึงบ้านแล้วค่ะ"}</div><div style={{fontSize:GF.base,color:C.mid,marginTop:4}}>{"ชอบคุณทิพย์ไหมคะ?"}</div></div><div style={{display:'flex',gap:8,justifyContent:'center'}}>{[1,2,3,4,5].map(i=><span key={i} style={{fontSize:32,cursor:'pointer',color:i<=4?'#EF9F27':'#CBD5E1'}}>{i<=4?'★':'☆'}</span>)}</div><div style={{width:'100%',padding:16,borderRadius:14,background:'#FAECE7',border:'2px solid #D85A30',color:'#D85A30',fontSize:GF.large,fontWeight:700,textAlign:'center',cursor:'pointer'}}>{"❤️ กดค้างพูดบอกความรู้สึก"}</div></div>;}
+function GPraise(){
+  const[score,setScore]=useState(0);const[hover,setHover]=useState(0);
+  const[submitted,setSubmitted]=useState(false);
+  const[rec,setRec]=useState(false);const[voiceUrl,setVUrl]=useState(null);
+  const recRef=useRef(null);
+  const startVoice=async()=>{try{recRef.current=await createRecorder();recRef.current.start();setRec(true);}catch(e){console.error(e);}};
+  const stopVoice=async()=>{if(!recRef.current)return;setRec(false);try{const blob=await recRef.current.stop();setVUrl(URL.createObjectURL(blob));}catch(e){console.error(e);}};
+  const submit=()=>{const j=getJobs().find(j=>j.status==='completed');if(j&&score>0){addRating(j.jobId,score,voiceUrl||undefined);setSubmitted(true);}else if(score>0)setSubmitted(true);};
+  const careTeam=getJobs().find(j=>j.status==='completed')?.assignedTo||'คุณทิพย์';
+  if(submitted)return<div style={{background:'#fff',padding:14,textAlign:'center'}}><div style={{fontSize:48,marginBottom:8}}>{"🙏"}</div><div style={{fontSize:GF.large,fontWeight:800,color:C.suc}}>{"ขอบคุณมากค่ะ!"}</div><div style={{fontSize:GF.base,color:C.mid,marginTop:4}}>{"คะแนน "+score+" ดาว · "+careTeam}</div>{voiceUrl&&<audio controls src={voiceUrl} style={{width:'100%',height:32,marginTop:8}}/>}</div>;
+  return<div style={{background:'#fff',padding:14,display:'flex',flexDirection:'column',gap:10}}>
+    <div style={{textAlign:'center'}}><div style={{fontSize:36,marginBottom:6}}>{"🏡"}</div><div style={{fontSize:GF.large,fontWeight:800}}>{"กลับถึงบ้านแล้วค่ะ"}</div><div style={{fontSize:GF.base,color:C.mid,marginTop:4}}>{"ชอบ"+careTeam+"ไหมคะ?"}</div></div>
+    <div style={{display:'flex',gap:8,justifyContent:'center'}}>{[1,2,3,4,5].map(i=><span key={i} onClick={()=>setScore(i)} onMouseEnter={()=>setHover(i)} onMouseLeave={()=>setHover(0)} style={{fontSize:36,cursor:'pointer',color:i<=(hover||score)?'#EF9F27':'#CBD5E1',transition:'color .15s'}}>{i<=(hover||score)?'★':'☆'}</span>)}</div>
+    <div onPointerDown={startVoice} onPointerUp={stopVoice} onPointerLeave={rec?stopVoice:undefined} style={{width:'100%',padding:14,borderRadius:14,background:rec?C.dan+'20':'#FAECE7',border:`2px solid ${rec?C.dan:'#D85A30'}`,color:rec?C.dan:'#D85A30',fontSize:GF.base,fontWeight:700,textAlign:'center',cursor:'pointer',userSelect:'none'}}>
+      {rec?<>{"⏹ กำลังฟัง…"}</>:<>{"❤️ กดค้างพูดบอกความรู้สึก"}</>}
+    </div>
+    {voiceUrl&&<audio controls src={voiceUrl} style={{width:'100%',height:32}}/>}
+    {score>0&&<button onClick={submit} style={{width:'100%',padding:14,borderRadius:12,background:C.suc,color:'#fff',border:'none',fontSize:GF.large,fontWeight:700,cursor:'pointer'}}>{"ส่งความคิดเห็น ✅"}</button>}
+  </div>;
+}
 function GMed(){return <div style={{background:'#fff',padding:14,display:'flex',flexDirection:'column',gap:10}}><div style={{textAlign:'center'}}><div style={{fontSize:40,marginBottom:6}}>{"💊"}</div><div style={{fontSize:GF.large,fontWeight:800}}>{"ถึงเวลากินยาค่ะ"}</div></div><div style={{background:'#F8FAFC',borderRadius:12,padding:12,border:'1px solid '+C.bdr}}>{[{ic:'🔵',n:'AMLODIPINE 5mg',d:'ความดัน · 1 เม็ด'},{ic:'⚪',n:'Multivitamin',d:'บำรุง · 1 เม็ด'}].map((item,i)=><div key={i} style={{display:'flex',alignItems:'center',gap:12,padding:'8px 0',borderBottom:i===0?'1px solid '+C.bdr:'none'}}><div style={{width:38,height:38,borderRadius:'50%',background:'#EEEDFE',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,flexShrink:0}}>{item.ic}</div><div><div style={{fontSize:GF.large,fontWeight:600}}>{item.n}</div><div style={{fontSize:GF.base-4,color:C.mid}}>{item.d}</div></div></div>)}</div><button style={{width:'100%',height:GF.btn,borderRadius:12,background:C.suc,color:'#fff',border:'none',fontSize:GF.large,fontWeight:700,cursor:'pointer'}}>{"✅ กินยาแล้ว — แจ้งลูกสาว"}</button></div>;}
 
 // ── CARE TEAM ─────────────────────────────────────────────────────
@@ -1287,10 +1307,22 @@ function OpsWebDash(){
         <div><ST ic="📋" ch="Active Jobs"/>{[...liveJobs.map((b,i)=>{const bd=b.bookingData||{};const lastCp=b.checkpoints?.slice(-1)[0]?.label||'รับงานแล้ว';const pct=Math.min(100,Math.round((b.checkpoints?.length||0)/5*100));return<div key={'ls'+i} style={{background:C.bg,borderRadius:7,padding:'5px 7px',marginBottom:4,border:'1px solid '+C.bdr}}><div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{fontSize:11,fontWeight:700}}>{bd.patient?.name||b.jobId}</span><Tag ch={lastCp} col={C.pri}/></div><div style={{height:4,background:'#E2E8F0',borderRadius:2}}><div style={{height:4,width:`${pct||5}%`,background:C.pri,borderRadius:2}}/></div></div>;}),{n:'คุณยายสมจิตร',st:'ในรพ.',pct:60,c:C.wrn},{n:'คุณยายวิมล',st:'รอพบแพทย์',pct:45,c:C.pri},{n:'คุณตาประสิทธิ์',st:'รับยา',pct:80,c:C.org}].map((j,i)=>j.jobId?null:<div key={i} style={{background:C.bg,borderRadius:7,padding:'5px 7px',marginBottom:4,border:'1px solid '+C.bdr}}><div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{fontSize:11,fontWeight:700}}>{j.n}</span><Tag ch={j.st} col={j.c}/></div><div style={{height:4,background:'#E2E8F0',borderRadius:2}}><div style={{height:4,width:`${j.pct}%`,background:j.c,borderRadius:2}}/></div></div>)}<Alrt t="warning" ch="⏰ คุณยายวิมล รอยา 45+ นาที (SLA)"/><Alrt t="danger" ch="🖤 Black Heart Alert x3"/></div>
         <div><ST ic="⚡" ch="Actions"/>{[{t:'🔴 โทรร้องเรียน',a:'โทร',c:C.dan},{t:'🖤 วิเคราะห์ Hearts',a:'ดู',c:C.drk},{t:'📋 KYC 3 ใบ',a:'อนุมัติ',c:C.pri}].map((a,i)=><div key={i} style={{background:C.bg,border:'1px solid '+C.bdr,borderRadius:8,padding:'6px 8px',marginBottom:4}}><div style={{fontSize:10,fontWeight:700,marginBottom:2}}>{a.t}</div><Btn ch={a.a} col={a.c} sm/></div>)}<div style={{background:'#FFF1F2',border:'2px solid '+C.dan,borderRadius:8,padding:8,textAlign:'center'}}><div style={{fontSize:10,fontWeight:700,color:C.dan,marginBottom:3}}>{"🚨 SOS War Room"}</div><Btn ch="📞 1669" col='#7F1D1D' sm s={{width:'100%'}}/></div></div>
       </div>}
-      {tab==='emotional'&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-        <div><ST ic="🤖" ch="AI Voice Sentiment"/><Alrt t="danger" ch="🔴 Risk: คุณรู้ใจ B · ฟังเสียง"/><BX l="Sentiment timeline วันนี้" h={80}/><div style={{display:'flex',gap:4,marginTop:4}}>        <div style={{flex:1,background:'#FFF1F2',borderRadius:8,padding:'7px',textAlign:'center'}}><div style={{fontSize:16}}>{"❤️"}</div><div style={{fontSize:14,fontWeight:800,color:C.dan}}>{"24"}</div><div style={{fontSize:9,color:C.mid}}>{"หัวใจแดง"}</div></div><div style={{flex:1,background:'#1E293B',borderRadius:8,padding:'7px',textAlign:'center'}}><div style={{fontSize:16}}>{"🖤"}</div><div style={{fontSize:14,fontWeight:800,color:'#fff'}}>{"3"}</div><div style={{fontSize:9,color:'#94A3B8'}}>{"หัวใจดำ"}</div></div></div></div>
-        <div><ST ic="⭐" ch="360° Scores"/>{[{n:'คุณรู้ใจ A',s:4.8},{n:'คุณขับดี C',s:4.5},{n:'คุณดูแล B',s:4.9},{n:'คุณรู้ใจ D',s:3.9,flag:true}].map((p,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',padding:'5px 7px',background:p.flag?'#FFF1F2':C.bg,borderRadius:6,marginBottom:3,fontSize:11}}><span>{p.flag&&'⚠️ '}<span style={{fontWeight:700}}>{p.n}</span></span><span style={{fontWeight:700,color:p.s>=4.5?C.suc:p.s>=4?C.wrn:C.dan}}>{"⭐ "+p.s}</span></div>)}</div>
-      </div>}
+      {tab==='emotional'&&(()=>{
+        const rmap={};lsBooks.filter(b=>b.rating&&b.assignedTo).forEach(b=>{if(!rmap[b.assignedTo])rmap[b.assignedTo]={total:0,count:0};rmap[b.assignedTo].total+=b.rating.score;rmap[b.assignedTo].count++;});
+        const realScores=Object.entries(rmap).map(([n,r])=>({n,s:+(r.total/r.count).toFixed(1),count:r.count})).sort((a,b)=>b.s-a.s);
+        const mockScores=[{n:'คุณรู้ใจ A',s:4.8},{n:'คุณขับดี C',s:4.5},{n:'คุณดูแล B',s:4.9},{n:'คุณรู้ใจ D',s:3.9,flag:true}];
+        const scores=realScores.length>0?realScores:mockScores;
+        const jobsWithSentiment=lsBooks.filter(b=>b.voiceSentiment);
+        const avgSentiment=jobsWithSentiment.length>0?(jobsWithSentiment.reduce((s,b)=>s+b.voiceSentiment.score,0)/jobsWithSentiment.length).toFixed(1):null;
+        const allFlags=lsBooks.flatMap(b=>b.voiceSentiment?.flags||[]);
+        return<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <div><ST ic="🤖" ch="AI Voice Sentiment"/>
+            {avgSentiment?<Alrt t={avgSentiment>=4?'success':avgSentiment>=3?'warning':'danger'} ch={'📊 เฉลี่ย '+avgSentiment+'/5 · '+jobsWithSentiment.length+' งาน'}/>:<Alrt t="danger" ch="🔴 Risk: คุณรู้ใจ B · ฟังเสียง"/>}
+            {allFlags.length>0&&allFlags.slice(0,3).map((f,i)=><Alrt key={i} t="warning" ch={'⚠️ '+f}/>)}
+            <BX l="Sentiment timeline วันนี้" h={60}/><div style={{display:'flex',gap:4,marginTop:4}}><div style={{flex:1,background:'#FFF1F2',borderRadius:8,padding:'7px',textAlign:'center'}}><div style={{fontSize:16}}>{"❤️"}</div><div style={{fontSize:14,fontWeight:800,color:C.dan}}>{"24"}</div><div style={{fontSize:9,color:C.mid}}>{"หัวใจแดง"}</div></div><div style={{flex:1,background:'#1E293B',borderRadius:8,padding:'7px',textAlign:'center'}}><div style={{fontSize:16}}>{"🖤"}</div><div style={{fontSize:14,fontWeight:800,color:'#fff'}}>{"3"}</div><div style={{fontSize:9,color:'#94A3B8'}}>{"หัวใจดำ"}</div></div></div>
+          </div>
+          <div><ST ic="⭐" ch={"360° Scores"+(realScores.length>0?' (จริง)':'')}/>{scores.map((p,i)=><div key={i} style={{display:'flex',justifyContent:'space-between',padding:'5px 7px',background:p.flag||p.s<4?'#FFF1F2':C.bg,borderRadius:6,marginBottom:3,fontSize:11}}><span>{(p.flag||p.s<4)&&'⚠️ '}<span style={{fontWeight:700}}>{p.n}</span>{p.count&&<span style={{fontSize:9,color:C.mid}}>{' ('+p.count+')'}</span>}</span><span style={{fontWeight:700,color:p.s>=4.5?C.suc:p.s>=4?C.wrn:C.dan}}>{"⭐ "+p.s}</span></div>)}</div>
+        </div>;})()}
       {tab==='lb'&&<div><ST ic="🏆" ch="Leaderboard เดือนนี้"/><table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}><thead><tr style={{background:'#EFF6FF'}}>{['#','ชื่อ','Tier','งาน','⭐','❤️','Score'].map((h,i)=><th key={i} style={{padding:'6px 8px',textAlign:'left',fontWeight:700,borderBottom:'2px solid '+C.bdr}}>{h}</th>)}</tr></thead><tbody>{[{r:'🥇',n:'คุณดูแล B',t:'Admin',j:45,rt:4.9,h:38,s:982},{r:'🥈',n:'คุณรู้ใจ A',t:'RN',j:38,rt:4.8,h:32,s:945},{r:'🥉',n:'คุณขับดี C',t:'Driver',j:52,rt:4.7,h:29,s:921}].map((r,i)=><tr key={i} style={{borderBottom:'1px solid '+C.bdr}}><td style={{padding:'6px 8px'}}>{r.r}</td><td style={{padding:'6px 8px',fontWeight:700}}>{r.n}</td><td style={{padding:'6px 8px'}}><Tag ch={r.t} col={C.pri}/></td><td style={{padding:'6px 8px'}}>{r.j}</td><td style={{padding:'6px 8px',color:C.wrn}}>{"⭐"+r.rt}</td><td style={{padding:'6px 8px',color:C.dan}}>{"❤️"+r.h}</td><td style={{padding:'6px 8px',fontWeight:800,color:C.pri}}>{r.s}</td></tr>)}</tbody></table></div>}
       {tab==='backlog'&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
         <div><ST ic="📋" ch={"Unmatched ("+(lsBooks.length+2)+")"}/>
@@ -1309,13 +1341,18 @@ function OpsWebDash(){
 
 function MgmtWebDash(){
   const[tab,st]=useState('financial');
+  const[mjobs,setMJobs]=useState(()=>getJobs());
+  useEffect(()=>{const load=()=>setMJobs(getJobs());window.addEventListener(JOB_UPDATED_EVENT,load);return()=>window.removeEventListener(JOB_UPDATED_EVENT,load);},[]);
+  const completedJobs=mjobs.filter(j=>j.status==='completed');
+  const realGMV=completedJobs.length*1500;
+  const realRevenue=Math.round(realGMV*0.255);
   return <div style={{background:'#fff',borderRadius:12,border:'1px solid '+C.bdr,overflow:'hidden'}}>
     <div style={{background:C.nvy,padding:'10px 13px',display:'flex',justifyContent:'space-between'}}>
       <div><div style={{color:'#fff',fontWeight:800,fontSize:14}}>{"📊 Welcares Management"}</div><div style={{color:'rgba(255,255,255,0.5)',fontSize:9}}>{"Strategic Command Center · Q1 2568"}</div></div>
       <Tag ch="Web" col='#93C5FD'/>
     </div>
     <div style={{background:'#EFF6FF',padding:'7px 11px',display:'flex',gap:4,flexWrap:'wrap',borderBottom:'1px solid '+C.bdr}}>
-      {[{l:'GMV',v:'฿2.4M',sub:'+18%',c:C.suc},{l:'Revenue',v:'฿612K',sub:'+24%',c:C.pri},{l:'Expenses',v:'฿328K',sub:'+11%',c:C.dan},{l:'EBITDA',v:'฿284K',sub:'+31%',c:C.tel},{l:'Customers',v:'847',sub:'+12%',c:C.pur},{l:'LTV/CAC',v:'8.4x',c:C.org}].map((k,i)=><KPI key={i} l={k.l} v={k.v} sub={k.sub} col={k.c}/>)}
+      {[{l:'GMV',v:realGMV>0?'฿'+realGMV.toLocaleString():'฿2.4M',sub:'+18%',c:C.suc},{l:'Revenue',v:realRevenue>0?'฿'+realRevenue.toLocaleString():'฿612K',sub:'+24%',c:C.pri},{l:'Expenses',v:'฿328K',sub:'+11%',c:C.dan},{l:'EBITDA',v:'฿284K',sub:'+31%',c:C.tel},{l:'Customers',v:'847',sub:'+12%',c:C.pur},{l:'LTV/CAC',v:'8.4x',c:C.org}].map((k,i)=><KPI key={i} l={k.l} v={k.v} sub={k.sub} col={k.c}/>)}
     </div>
     <div style={{borderBottom:'2px solid '+C.bdr,display:'flex',overflowX:'auto'}}>
       {[['financial','💰 Financial'],['customer','👥 Customer'],['growth','📈 Growth'],['ai','🤖 AI Insights'],['projection','📊 Projection']].map(([id,l])=><button key={id} onClick={()=>st(id)} style={{padding:'7px 9px',background:'none',border:'none',borderBottom:`2px solid ${tab===id?C.nvy:'transparent'}`,color:tab===id?C.nvy:C.mid,fontWeight:tab===id?700:400,fontSize:11,cursor:'pointer',whiteSpace:'nowrap',marginBottom:-2}}>{l}</button>)}
@@ -1359,7 +1396,7 @@ function LineView(){
   const[ent,setEnt]=useState('daughter');
   const[realMsgs,setRealMsgs]=useState([]);
   const labels={daughter:'👩 ลูกสาว',rujai:'🤝 คุณรู้ใจ',khabdi:'🚗 คุณขับดี',dulaeh:'💊 คุณดูแล',grandma:'👵 คุณยาย'};
-  useEffect(()=>{const load=()=>{const jobs=getJobs().filter(j=>j.status&&j.status!=='cancelled');const cpIcons={'รับจากบ้าน':'📍','ถึง รพ.':'🏥','รอพบแพทย์':'👨‍⚕️','รอรับยา':'💊','ส่งกลับบ้าน':'🏡','PIN ✓ เริ่มงาน':'🔑','ปิดงาน':'🏁'};const msgs=[];const svc={'hospital-visit':'พบแพทย์','dialysis':'ล้างไต','chemotherapy':'เคมีบำบัด','physical-therapy':'กายภาพบำบัด','checkup':'ตรวจสุขภาพ','vaccination':'วัคซีน','other':'บริการทั่วไป'};jobs.forEach(j=>{const bd=j.bookingData||{};msgs.push({time:'🆕 ใหม่',title:'✅ ยืนยันการจองแล้ว',body:'📋 '+j.jobId+'\n🏥 '+(svc[bd.service?.type]||bd.service?.type||'-')+'\n📅 '+([bd.schedule?.date,bd.schedule?.time].filter(Boolean).join(' ')||'-')+'\n📍 '+(bd.locations?.dropoff||'-')+'\n👤 '+(bd.patient?.name||'-'),cta:'ดูรายละเอียด',_real:true});(j.checkpoints||[]).forEach(cp=>{try{const d=new Date(cp.time);const tm=d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');msgs.push({time:tm,title:(cpIcons[cp.label]||'📍')+' '+cp.label,body:'บันทึกแล้วค่ะ ✅',_real:true});}catch{}});});setRealMsgs(msgs);};load();window.addEventListener(JOB_UPDATED_EVENT,load);return()=>window.removeEventListener(JOB_UPDATED_EVENT,load);},[]);
+  useEffect(()=>{const load=()=>{const jobs=getJobs().filter(j=>j.status&&j.status!=='cancelled');const cpIcons={'รับจากบ้าน':'📍','ถึง รพ.':'🏥','รอพบแพทย์':'👨‍⚕️','รอรับยา':'💊','ส่งกลับบ้าน':'🏡','PIN ✓ เริ่มงาน':'🔑','ปิดงาน':'🏁'};const msgs=[];const svc={'hospital-visit':'พบแพทย์','dialysis':'ล้างไต','chemotherapy':'เคมีบำบัด','physical-therapy':'กายภาพบำบัด','checkup':'ตรวจสุขภาพ','vaccination':'วัคซีน','other':'บริการทั่วไป'};jobs.forEach(j=>{const bd=j.bookingData||{};msgs.push({time:'🆕 ใหม่',title:'✅ ยืนยันการจองแล้ว',body:'📋 '+j.jobId+'\n🏥 '+(svc[bd.service?.type]||bd.service?.type||'-')+'\n📅 '+([bd.schedule?.date,bd.schedule?.time].filter(Boolean).join(' ')||'-')+'\n📍 '+(bd.locations?.dropoff||'-')+'\n👤 '+(bd.patient?.name||'-'),cta:'ดูรายละเอียด',_real:true});(j.checkpoints||[]).filter(cp=>!cp.vitals&&cp.label!=='vitals'&&!cp.label.startsWith('ตรวจยา:')).forEach(cp=>{try{const d=new Date(cp.time);const tm=d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');msgs.push({time:tm,title:(cpIcons[cp.label]||'📍')+' '+cp.label,body:'บันทึกแล้วค่ะ ✅',photo:cp.photo||undefined,_real:true});}catch{}});if(j.status==='completed'){const firstPhoto=(j.checkpoints||[]).find(cp=>cp.photo)?.photo;const vitals=(j.checkpoints||[]).find(cp=>cp.vitals)?.vitals;const sent=j.voiceSentiment;const bodyLines=[(bd.patient?.name||'ผู้ป่วย')+'ปลอดภัยแล้วค่ะ 🥰',j.assignedTo?'ดูแลโดย '+j.assignedTo:'',(vitals?.bp?'🩺 BP: '+vitals.bp+(vitals.spo2?' · SpO2: '+vitals.spo2+'%':''):''),sent?'😊 ประเมิน '+sent.score+'/5':'',j.reportApproved?'📋 Medical Report พร้อมแล้ว':''].filter(Boolean);msgs.push({time:'✅',title:'🏡 กลับถึงบ้านแล้วค่ะ',body:bodyLines.join('\n'),photo:firstPhoto,cta:j.reportApproved?'ดู Medical Report':undefined,_real:true});}if(j.rating?.score){msgs.push({time:'⭐',title:'ขอบคุณที่ให้คะแนนค่ะ',body:'คุณให้ '+j.rating.score+' ดาว'+(j.assignedTo?' · '+j.assignedTo:''),_real:true});}});setRealMsgs(msgs);};load();window.addEventListener(JOB_UPDATED_EVENT,load);return()=>window.removeEventListener(JOB_UPDATED_EVENT,load);},[]);
   const msgs=ent==='daughter'?[...realMsgs,...LINE_DATA[ent]||[]]:LINE_DATA[ent]||[];
   return <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:8}}>
     <div style={{display:'flex',gap:3,flexWrap:'wrap',justifyContent:'center'}}>

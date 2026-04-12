@@ -36,6 +36,8 @@ export interface StoredJob {
   voiceNoteUrl?: string;
   voiceTranscript?: string;
   voiceSentiment?: { score: number; flags: string[]; summary: string };
+  rating?: { score: number; timestamp: string; voiceUrl?: string };
+  reportApproved?: boolean;
 }
 
 // ── reads ──────────────────────────────────────────────────────────────────
@@ -118,6 +120,10 @@ export function addCheckpointWithData(
     ? existing.map((c, i) => i === idx ? { ...c, ...extra } : c)
     : [...existing, cp];
   updateJob(jobId, { checkpoints, status: 'active' });
+}
+
+export function addRating(jobId: string, score: number, voiceUrl?: string): void {
+  updateJob(jobId, { rating: { score, timestamp: new Date().toISOString(), voiceUrl } });
 }
 
 export function updateVoiceData(
