@@ -52,7 +52,7 @@ function useAudioLevel(recRef,recording){
   useEffect(()=>{
     if(!recording||!recRef.current?.getLevel)return;
     let raf;
-    const tick=()=>{setLevel(recRef.current?.getLevel()||0);raf=requestAnimationFrame(tick);};
+    const tick=()=>{try{setLevel(recRef.current?.getLevel()||0);}catch{}raf=requestAnimationFrame(tick);};
     raf=requestAnimationFrame(tick);
     return()=>{cancelAnimationFrame(raf);setLevel(0);};
   },[recording]);
@@ -780,7 +780,7 @@ function DReport(){
   const[job,setJob]=useState(()=>getActiveJob()||getJobs().find(j=>j.status==='completed'));
   useEffect(()=>{const load=()=>setJob(getActiveJob()||getJobs().find(j=>j.status==='completed'));load();window.addEventListener(JOB_UPDATED_EVENT,load);return()=>window.removeEventListener(JOB_UPDATED_EVENT,load);},[]);
   const scoreCol=s=>s>=4?C.suc:s>=3?C.wrn:C.dan;
-  const scoreEmoji=s=>s>=4?'😊 ดี':'s>=3'?'😐 ปกติ':'😟 ต้องติดตาม';
+  const scoreEmoji=s=>s>=4?'😊 ดี':s>=3?'😐 ปกติ':'😟 ต้องติดตาม';
   return <div style={{padding:'8px 9px',background:C.bg}}>
     <div style={{display:'flex',gap:2,marginBottom:7,overflowX:'auto'}}>
       {[{v:'emotion',l:'😊'},{v:'doctor',l:'👨‍⚕️'},{v:'meds',l:'💊'},{v:'note',l:'📝 Note'}].map(r=><button key={r.v} onClick={()=>srt(r.v)} style={{flex:1,padding:'4px 2px',borderRadius:6,border:`1px solid ${rt===r.v?C.pri:C.bdr}`,background:rt===r.v?'#EEEDFE':'#fff',fontSize:8,color:rt===r.v?C.pri:C.mid,cursor:'pointer',fontWeight:rt===r.v?700:400,whiteSpace:'nowrap',minWidth:40}}>{r.l}</button>)}
@@ -824,18 +824,24 @@ function DNCare(){
   const recRef=useRef(null);
   const level=useAudioLevel(recRef,rec);
   const PROMPT='คุณคือน้องแคร์ AI ผู้ช่วย Welcares สำหรับครอบครัว ตอบภาษาไทย 1-3 ประโยค ให้ข้อมูลสถานะผู้ป่วย นัดหมาย หรือข้อสงสัยเกี่ยวกับบริการ ใช้ภาษาสุภาพและเป็นมิตร';
-  const startV=async()=>{try{recRef.current=await createRecorder();recRef.current.start();setRec(true);}catch{alert('กรุณาอนุญาตใช้ไมค์ก่อนนะคะ 🙏');}};
+  const startV=async()=>{
+    if(!getApiKey()){setMsgs(m=>[...m,{role:'ai',text:'กรุณาตั้งค่า API Key ก่อนนะคะ 🙏'}]);return;}
+    try{recRef.current=await createRecorder();recRef.current.start();setRec(true);}
+    catch{setMsgs(m=>[...m,{role:'ai',text:'ไม่สามารถเข้าถึงไมค์ได้ค่ะ กรุณาอนุญาตในเบราว์เซอร์ 🙏'}]);}
+  };
   const stopV=async()=>{
     if(!recRef.current||!rec)return;
     setRec(false);setProc(true);
-    const blob=await recRef.current.stop();
-    const k=getApiKey();
-    if(!k){setMsgs(m=>[...m,{role:'ai',text:'ยังไม่ได้ตั้งค่า API Key ค่ะ 🙏'}]);setProc(false);return;}
-    const tx=await transcribeAudio(blob,k);
-    if(tx)setMsgs(m=>[...m,{role:'user',text:tx}]);
-    const reply=await chatWithAI(tx||'...',k,PROMPT);
-    setMsgs(m=>[...m,{role:'ai',text:reply||'ขอโทษค่ะ ไม่ได้ยิน ลองใหม่นะคะ'}]);
-    setProc(false);
+    try{
+      const blob=await recRef.current.stop();
+      const k=getApiKey();
+      const tx=await transcribeAudio(blob,k);
+      if(!tx){setMsgs(m=>[...m,{role:'ai',text:'ขอโทษค่ะ ไม่ได้ยินชัดเจน ลองพูดใหม่ได้เลยนะคะ 🙏'}]);setProc(false);return;}
+      setMsgs(m=>[...m,{role:'user',text:tx}]);
+      const reply=await chatWithAI(tx,k,PROMPT);
+      setMsgs(m=>[...m,{role:'ai',text:reply||'ขอโทษค่ะ มีปัญหาการเชื่อมต่อ ลองใหม่อีกครั้งนะคะ 🙏'}]);
+    }catch{setMsgs(m=>[...m,{role:'ai',text:'เกิดข้อผิดพลาด ลองใหม่อีกครั้งนะคะ 🙏'}]);}
+    finally{setProc(false);}
   };
   const last5=msgs.slice(-5);
   return <div style={{background:C.bg,minHeight:450,display:'flex',flexDirection:'column'}}>
@@ -891,18 +897,24 @@ function GNCare(){
   const recRef=useRef(null);
   const level=useAudioLevel(recRef,rec);
   const PROMPT='คุณคือน้องแคร์ AI ผู้ช่วยดูแลผู้สูงอายุของ Welcares ตอบภาษาไทย สั้น อบอุ่น 1-2 ประโยค ใช้ Emoji เพิ่มความน่ารัก ห้ามพูดยาว';
-  const startV=async()=>{try{recRef.current=await createRecorder();recRef.current.start();setRec(true);}catch{alert('กรุณาอนุญาตใช้ไมค์ก่อนนะคะ 🙏');}};
+  const startV=async()=>{
+    if(!getApiKey()){setMsgs(m=>[...m,{role:'ai',text:'กรุณาตั้งค่า API Key ก่อนนะคะ 🙏'}]);return;}
+    try{recRef.current=await createRecorder();recRef.current.start();setRec(true);}
+    catch{setMsgs(m=>[...m,{role:'ai',text:'ไม่สามารถเข้าถึงไมค์ได้ค่ะ กรุณาอนุญาตในเบราว์เซอร์ 🙏'}]);}
+  };
   const stopV=async()=>{
     if(!recRef.current||!rec)return;
     setRec(false);setProc(true);
-    const blob=await recRef.current.stop();
-    const k=getApiKey();
-    if(!k){setMsgs(m=>[...m,{role:'ai',text:'ยังไม่ได้ตั้งค่า API Key ค่ะ กรุณาใส่ที่เมนูตั้งค่าก่อนนะคะ 🙏'}]);setProc(false);return;}
-    const tx=await transcribeAudio(blob,k);
-    if(tx)setMsgs(m=>[...m,{role:'user',text:tx}]);
-    const reply=await chatWithAI(tx||'...', k, PROMPT);
-    setMsgs(m=>[...m,{role:'ai',text:reply||'ขอโทษค่ะ ไม่ได้ยินชัดเจน ลองพูดใหม่ได้เลยนะคะ 🙏'}]);
-    setProc(false);
+    try{
+      const blob=await recRef.current.stop();
+      const k=getApiKey();
+      const tx=await transcribeAudio(blob,k);
+      if(!tx){setMsgs(m=>[...m,{role:'ai',text:'ขอโทษค่ะ ไม่ได้ยินชัดเจน ลองพูดใหม่ได้เลยนะคะ 🙏'}]);setProc(false);return;}
+      setMsgs(m=>[...m,{role:'user',text:tx}]);
+      const reply=await chatWithAI(tx,k,PROMPT);
+      setMsgs(m=>[...m,{role:'ai',text:reply||'ขอโทษค่ะ มีปัญหาการเชื่อมต่อ ลองใหม่ได้เลยนะคะ 🙏'}]);
+    }catch{setMsgs(m=>[...m,{role:'ai',text:'เกิดข้อผิดพลาด ลองใหม่อีกครั้งนะคะ 🙏'}]);}
+    finally{setProc(false);}
   };
   const last5=msgs.slice(-5);
   return <div style={{background:'#EEEDFE',minHeight:450,display:'flex',flexDirection:'column',padding:14,gap:8}}>
@@ -970,7 +982,7 @@ function GPraise(){
   const recRef=useRef(null);
   const level=useAudioLevel(recRef,rec);
   const startVoice=async()=>{try{recRef.current=await createRecorder();recRef.current.start();setRec(true);}catch(e){console.error(e);}};
-  const stopVoice=async()=>{if(!recRef.current||!rec)return;setRec(false);try{const blob=await recRef.current.stop();setVUrl(URL.createObjectURL(blob));}catch(e){console.error(e);}};
+  const stopVoice=async()=>{if(!recRef.current||!rec)return;setRec(false);try{const blob=await recRef.current.stop();setVUrl(prev=>{if(prev)URL.revokeObjectURL(prev);return URL.createObjectURL(blob);});}catch(e){console.error(e);}};
   const submit=()=>{const j=getJobs().find(j=>j.status==='completed');if(j&&score>0){addRating(j.jobId,score,voiceUrl||undefined);setSubmitted(true);}else if(score>0)setSubmitted(true);};
   const careTeam=getJobs().find(j=>j.status==='completed')?.assignedTo||'คุณทิพย์';
   if(submitted)return<div style={{background:'#fff',padding:14,textAlign:'center'}}><div style={{fontSize:48,marginBottom:8}}>{"🙏"}</div><div style={{fontSize:GF.large,fontWeight:800,color:C.suc}}>{"ขอบคุณมากค่ะ!"}</div><div style={{fontSize:GF.base,color:C.mid,marginTop:4}}>{"คะแนน "+score+" ดาว · "+careTeam}</div>{voiceUrl&&<audio controls src={voiceUrl} style={{width:'100%',height:32,marginTop:8}}/>}</div>;
@@ -1023,14 +1035,29 @@ function CTOpContact(){
   const[tx,setTx]=useState('');const[sent,setSent]=useState(false);
   const recRef=useRef(null);
   const level=useAudioLevel(recRef,rec);
-  const startV=async()=>{try{recRef.current=await createRecorder();recRef.current.start();setRec(true);}catch{alert('ไม่สามารถเข้าถึงไมค์ได้ค่ะ');}};
+  const startV=async()=>{
+    if(!getApiKey()){setSent(false);setTx('⚠️ กรุณาตั้งค่า API Key ก่อนนะคะ');return;}
+    try{recRef.current=await createRecorder();recRef.current.start();setRec(true);}
+    catch{alert('ไม่สามารถเข้าถึงไมค์ได้ค่ะ กรุณาอนุญาตในเบราว์เซอร์');}
+  };
   const stopV=async()=>{
     if(!recRef.current||!rec)return;
     setRec(false);setProc(true);
-    const blob=await recRef.current.stop();
-    const k=getApiKey();
-    if(k){const t=await transcribeAudio(blob,k);if(t){setTx(t);const j=getActiveJob();if(j)addCheckpointWithData(j.jobId,'Voice Report',{note:t});}}
-    setProc(false);
+    try{
+      const blob=await recRef.current.stop();
+      const k=getApiKey();
+      if(k){
+        const t=await transcribeAudio(blob,k);
+        if(t){
+          setTx(t.slice(0,200)+(t.length>200?'…':''));
+          const j=getActiveJob();
+          if(j)addCheckpointWithData(j.jobId,'Voice Report',{note:t});
+        } else {
+          setTx('ไม่ได้ยินชัดเจน ลองพูดใหม่ได้เลยค่ะ');
+        }
+      }
+    }catch{setTx('เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้งค่ะ');}
+    finally{setProc(false);}
   };
   return <div style={{background:C.bg}}>
     <div style={{background:C.lin,padding:'8px 11px',display:'flex',alignItems:'center',gap:8}}><div style={{width:24,height:24,background:'white',borderRadius:7,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13}}>{"🤖"}</div><span style={{color:'white',fontWeight:700,fontSize:11}}>{"น้องแคร์ + ติดต่อ Ops"}</span></div>
@@ -1039,8 +1066,8 @@ function CTOpContact(){
       <button onPointerDown={startV} onPointerUp={stopV} onPointerLeave={rec?stopV:undefined}
         style={{width:62,height:62,borderRadius:'50%',background:rec?C.dan:C.pri,color:'#fff',fontSize:24,border:`3px solid ${rec?'rgba(239,68,68,.25)':'rgba(127,119,221,.25)'}`,cursor:'pointer',marginTop:rec?0:10,transition:'background .2s',userSelect:'none',WebkitUserSelect:'none',touchAction:'none'}}>{"🎙"}</button>
       <div style={{fontSize:11,color:C.mid}}>{rec?'ปล่อยเมื่อพูดเสร็จ':proc?'⏳ กำลังถอดความ…':'กดค้างรายงานให้ Ops'}</div>
-      {tx&&<div style={{width:'100%',background:'#F8FAFC',border:'1px solid '+C.bdr,borderRadius:8,padding:'7px 9px',fontSize:10,color:C.txt,lineHeight:1.6,fontStyle:'italic'}}>{"\""+tx+"\""}</div>}
-      {tx&&!sent&&<Btn ch="📤 ส่ง Ops →" col={C.pri} s={{width:'100%'}} fn={()=>setSent(true)}/>}
+      {tx&&<div style={{width:'100%',background:'#F8FAFC',border:`1px solid ${tx.startsWith('⚠️')||tx.startsWith('ไม่ได้')||tx.startsWith('เกิด')?C.wrn:C.bdr}`,borderRadius:8,padding:'7px 9px',fontSize:10,color:C.txt,lineHeight:1.6,fontStyle:'italic'}}>{"\""+tx+"\""}</div>}
+      {tx&&!sent&&!tx.startsWith('⚠️')&&!tx.startsWith('ไม่ได้')&&!tx.startsWith('เกิด')&&<Btn ch="📤 ส่ง Ops →" col={C.pri} s={{width:'100%'}} fn={()=>setSent(true)}/>}
       {sent&&<Alrt t="success" ch="✅ ส่ง Ops แล้วค่ะ · จะได้รับการตอบกลับเร็วๆ นี้"/>}
       <HR/>
       <div style={{width:'100%'}}><div style={{fontSize:10,fontWeight:700,marginBottom:5}}>{"📞 ติดต่อ Operation"}</div>
@@ -1105,17 +1132,26 @@ function CloseHearts(){
     catch(e){console.error(e);alert('ไม่สามารถเข้าถึงไมโครโฟนได้ค่ะ กรุณาอนุญาตในเบราว์เซอร์');}
   };
   const stopRec=async()=>{
-    if(!recRef.current)return;setRec(false);setProc(true);
+    if(!recRef.current||!rec)return;setRec(false);setProc(true);
     try{
       const blob=await recRef.current.stop();
-      const url=URL.createObjectURL(blob);setVoiceUrl(url);
-      const j=getActiveJob();if(j)updateVoiceData(j.jobId,{url});
+      const url=URL.createObjectURL(blob);
+      setVoiceUrl(prev=>{if(prev)URL.revokeObjectURL(prev);return url;});
+      const j=getActiveJob();
       const k=getApiKey();
       if(k){
         const tx=await transcribeAudio(blob,k);
-        if(tx){setTranscript(tx);if(j)updateVoiceData(j.jobId,{url,transcript:tx});}
-        const s=await analyzeTranscript(tx||'',k);
-        setSentiment(s);if(j)updateVoiceData(j.jobId,{url,transcript:tx,sentiment:s});
+        if(tx){
+          setTranscript(tx);
+          const s=await analyzeTranscript(tx,k);
+          setSentiment(s);
+          if(j)updateVoiceData(j.jobId,{url,transcript:tx,sentiment:s});
+        } else {
+          setTranscript('');
+          if(j)updateVoiceData(j.jobId,{url});
+        }
+      } else {
+        if(j)updateVoiceData(j.jobId,{url});
       }
     }catch(e){console.error(e);}finally{setProc(false);}
   };
